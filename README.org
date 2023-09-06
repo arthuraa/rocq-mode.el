@@ -1,0 +1,20 @@
+#+TITLE: rocq-mode.el
+
+=rocq-mode= is an Emacs mode for the Rocq theorem prover, using [[https://github.com/ejgallego/coq-lsp][coq-lsp]] under
+the hood, licensed under the GPLv3 or later.
+
+This package depends on [[https://github.com/joaotavora/eglot][Eglot]] for its LSP support, and [[https://github.com/magit/magit/blob/main/lisp/magit-section.el][magit-section]] for the
+structured goal display.
+
+* Features
+- Structured goal display using magit-section, automatically refreshing based on
+  cursor position (other workflows possible, we can discuss them);
+- Processing overlay indicator;
+- Displaying of slow commands;
+- Automatic addition of other folders containing a =_CoqProject= file to the workspace;
+- Misc. =coq-lsp= commands like =rocq-trim= and =rocq-save-vo=.
+
+* Disclaimer
+This package is a very early work-in-progress, tailored to my specific needs for
+now.  I'm using it happily on a daily basis, but it definitely could benefit
+from new features.
