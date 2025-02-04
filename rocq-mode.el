@@ -45,6 +45,7 @@
     (puthash "show_coq_info_messages" :json-false starting)
     (puthash "pp_type" 2 starting)
     (puthash "send_perf_data" (if (rocq--timing-data server) t :json-false) starting)
+    (puthash "check_only_on_request" t starting)
     starting))
 
 (defun rocq-add-folder-to-workspace (folder)
@@ -282,6 +283,35 @@ customizable variable `rocq-mode-too-slow'."
                                       'face 'error))))))
 
 
+;; Update view
+
+(defcustom rocq-mode-scroll-delay
+  0.5
+  "Debounce time before scroll notification is sent to coq-lsp."
+  :type '(number))
+
+(defvar rocq-mode--scroll-timer nil)
+
+(defun rocq-mode--update-view (window)
+  (setq rocq-mode--scroll-timer nil)
+  (let ((dstart (window-group-start window))
+        (dend (window-group-end window t)))
+    (with-selected-window window
+      (let ((server (eglot--current-server-or-lose)))
+        (jsonrpc-notify
+         server :coq/viewRange
+         `(:textDocument ,(eglot--VersionedTextDocumentIdentifier)
+           :range (:start ,(eglot--pos-to-lsp-position dstart)
+                          :end ,(eglot--pos-to-lsp-position dend))))))))
+
+(defun rocq-mode--scroll-function (window _)
+  (when rocq-mode--scroll-timer
+    (cancel-timer rocq-mode--scroll-timer))
+  (setq rocq-mode--scroll-timer
+        (run-at-time rocq-mode-scroll-delay nil #'rocq-mode--update-view window)))
+
+
+
 ;; General mode setup
 
 (defvar rocq-mode-syntax-table
@@ -303,6 +333,7 @@ customizable variable `rocq-mode-too-slow'."
     (rocq-add-folder-to-workspace rocq-proj-dir))
   (eglot-ensure)
   (add-hook 'post-command-hook #'rocq-mode--setup-timer)
+  (add-hook 'window-scroll-functions #'rocq-mode--scroll-function 0 t)
   (setq-local comment-start "(*"
               comment-end "*)"
               comment-style 'multi-line))
