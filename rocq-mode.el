@@ -42,9 +42,9 @@
 
 (cl-defmethod eglot-initialization-options ((server rocq--lsp-server))
   (let ((starting (make-hash-table :size 1)))
-    (puthash "show_coq_info_messages" nil starting)
+    (puthash "show_coq_info_messages" :json-false starting)
     (puthash "pp_type" 2 starting)
-    (puthash "send_data" (if (rocq--timing-data server) t :json-false) starting)
+    (puthash "send_perf_data" (if (rocq--timing-data server) t :json-false) starting)
     starting))
 
 (defun rocq-add-folder-to-workspace (folder)
