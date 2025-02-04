@@ -147,7 +147,7 @@
   "")
 
 (defface rocq-mode-processing-face
-  `((t :background "dark slate blue"))
+  `((t :background "light gray"))
   "")
 
 (defvar rocq-mode--idle-timer
@@ -203,7 +203,8 @@ considered slow."
   :type '(number))
 
 (defface rocq-mode-slow-face
-  `((t :background "firebrick4"))
+  `((t :background "firebrick4"
+       :foreground "white"))
   "Face used for slow commands.")
 
 (cl-defmethod eglot-handle-notification
