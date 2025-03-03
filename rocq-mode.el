@@ -140,17 +140,6 @@
                          (insert text "\n"))
                        messages))))))))))
 
-
-;; Processing overlay
-
-(defvar-local rocq-mode--processing-overlays
-    nil
-  "")
-
-(defface rocq-mode-processing-face
-  `((t :background "light gray"))
-  "")
-
 (defvar rocq-mode--idle-timer
   nil)
 
@@ -169,6 +158,17 @@
           (setq rocq-mode--idle-timer nil)
           (when (eq major-mode 'rocq-mode)
             (rocq-goals)))))))
+
+
+;; Processing overlay
+
+(defvar-local rocq-mode--processing-overlays
+    nil
+  "")
+
+(defface rocq-mode-processing-face
+  `((t :background "light gray"))
+  "")
 
 (cl-defmethod eglot-handle-notification
   ((server rocq--lsp-server) (_method (eql $/coq/fileProgress)) &key textDocument processing)
