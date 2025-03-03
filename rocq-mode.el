@@ -178,16 +178,17 @@
         (with-current-buffer buffer
           (when (equal (eglot--VersionedTextDocumentIdentifier) textDocument)
             (mapc #'delete-overlay rocq-mode--processing-overlays)
+            (setq rocq-mode--processing-overlays '())
             (mapc (eglot--lambda (range)
                     (eglot--dbind (start end) range
                       (let ((overlay
                              (make-overlay
                               (eglot--lsp-position-to-point start)
                               (eglot--lsp-position-to-point end))))
-                      (progn
-                        (add-to-list 'rocq-mode--processing-overlays
-                                     overlay)
-                        (overlay-put overlay 'face 'rocq-mode-processing-face)))))
+                        (progn
+                          (add-to-list 'rocq-mode--processing-overlays
+                                       overlay)
+                          (overlay-put overlay 'face 'rocq-mode-processing-face)))))
                   processing))))))
 
 
