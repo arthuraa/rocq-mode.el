@@ -306,7 +306,7 @@ customizable variable `rocq-mode-too-slow'."
                           :end ,(eglot--pos-to-lsp-position dend))))))))
 
 (defun rocq-mode--scroll-function (window _)
-  (when rocq-mode--scroll-timer
+  (when (timerp rocq-mode--scroll-timer)
     (cancel-timer rocq-mode--scroll-timer))
   (setq rocq-mode--scroll-timer
         (run-at-time rocq-mode-scroll-delay nil #'rocq-mode--update-view window)))
