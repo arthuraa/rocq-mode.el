@@ -29,6 +29,14 @@
    (timing-data
     :documentation "Whether to get timing data."
     :accessor rocq--timing-data
+    :initform nil)
+   (pending-file-progress
+    :documentation "Alist mapping LSP URIs to the last pending file progress notification."
+    :accessor rocq--pending-file-progress
+    :initform '())
+   (pending-file-progress-timer
+    :documentation "Timer for last pending file progress debouncing."
+    :accessor rocq--pending-file-progress-timer
     :initform nil)))
 
 (defun rocq-workspace-folder--repr (folder)
@@ -170,26 +178,47 @@
   `((t :background "light gray"))
   "")
 
+(defcustom rocq-mode-file-progress-debounce-time
+  0.2
+  "Debounce time for file progress update handling."
+  :type '(number))
+
+(defun rocq--update-file-progress (cs)
+  (if-let* ((uri (car cs))
+            (textDocument (cadr cs))
+            (processing (cddr cs))
+            (path (expand-file-name (eglot--uri-to-path uri)))
+            (buffer (find-buffer-visiting path)))
+      (with-current-buffer buffer
+        (when (equal (eglot--VersionedTextDocumentIdentifier) textDocument)
+          (mapc #'delete-overlay rocq-mode--processing-overlays)
+          (setq rocq-mode--processing-overlays '())
+          (mapc (eglot--lambda (range)
+                  (eglot--dbind (start end) range
+                    (let ((overlay
+                           (make-overlay
+                            (eglot--lsp-position-to-point start)
+                            (eglot--lsp-position-to-point end))))
+                      (progn
+                        (add-to-list 'rocq-mode--processing-overlays
+                                     overlay)
+                        (overlay-put overlay 'face 'rocq-mode-processing-face)))))
+                processing)))))
+
+(defun rocq--debounced-file-progress-handling (server)
+  (mapc #'rocq--update-file-progress (rocq--pending-file-progress server))
+  (setf (rocq--pending-file-progress server) '())
+  (setf (rocq--pending-file-progress-timer server) nil))
+
 (cl-defmethod eglot-handle-notification
   ((server rocq--lsp-server) (_method (eql $/coq/fileProgress)) &key textDocument processing)
   (eglot--dbind (uri) textDocument
-    (if-let* ((path (expand-file-name (eglot--uri-to-path uri)))
-              (buffer (find-buffer-visiting path)))
-        (with-current-buffer buffer
-          (when (equal (eglot--VersionedTextDocumentIdentifier) textDocument)
-            (mapc #'delete-overlay rocq-mode--processing-overlays)
-            (setq rocq-mode--processing-overlays '())
-            (mapc (eglot--lambda (range)
-                    (eglot--dbind (start end) range
-                      (let ((overlay
-                             (make-overlay
-                              (eglot--lsp-position-to-point start)
-                              (eglot--lsp-position-to-point end))))
-                        (progn
-                          (add-to-list 'rocq-mode--processing-overlays
-                                       overlay)
-                          (overlay-put overlay 'face 'rocq-mode-processing-face)))))
-                  processing))))))
+    (unless (timerp (rocq--pending-file-progress-timer server))
+      (run-with-timer rocq-mode-file-progress-debounce-time nil #'rocq--debounced-file-progress-handling server))
+    (let* ((notifs (rocq--pending-file-progress server))
+           (notifs (assoc-delete-all uri notifs)))
+      (setf (rocq--pending-file-progress server) (cons (cons uri (cons textDocument processing)) notifs)))
+))
 
 
 ;; Timing data display
