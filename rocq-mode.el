@@ -18,17 +18,13 @@
 
 ;;;###autoload
 (defclass rocq--lsp-server (eglot-lsp-server)
-  ((workspace
+  ((workspace-folders
     :documentation "List of workspace folders."
-    :accessor rocq--workspace
+    :reader rocq-workspace-folders
     :initform '())
-   (last-goal-request-state
-    :documentation "Last goal request state."
-    :accessor rocq--last-goal-request-state
-    :initform nil)
    (timing-data
     :documentation "Whether to get timing data."
-    :accessor rocq--timing-data
+    :reader rocq-timing-data
     :initform nil)
    (pending-file-progress
     :documentation "Alist mapping LSP URIs to the last pending file progress notification."
@@ -37,64 +33,154 @@
    (pending-file-progress-timer
     :documentation "Timer for last pending file progress debouncing."
     :accessor rocq--pending-file-progress-timer
-    :initform nil)))
+    :initform nil)
+   (check-on-request
+    :documentation "Whether to only check on request."
+    :reader rocq-check-on-request
+    :initform t)
+   (goal-after-tactic
+    :documentation "Whether to show the goals after the sentence under point."
+    :reader rocq-goal-after-tactic
+    :initform t)))
 
-(defun rocq-workspace-folder--repr (folder)
+
+;; XXX: This should really be a generic in eglot.
+;; We don't want eglot to use its configuration system because it relies solely on dir
+;; local variables.  We're a major mode, we can do this ourselves.
+(define-advice eglot--workspace-configuration-plist
+    (:around (oldfun server) rocq-configuration-plist)
+  (if (rocq--lsp-server-child-p server)
+      (eglot-initialization-options server)
+    (oldfun server)))
+
+(cl-defmethod eglot-initialization-options ((server rocq--lsp-server))
+  (list
+   :show_coq_info_messages :json-false
+   :pp_type 2
+   :send_perf_data (if (rocq-timing-data server) t :json-false)
+   :check_only_on_request (if (rocq-check-on-request server) t :json-false)))
+
+(cl-defgeneric (setf rocq-check-on-request) (value server)
+  ""
+  (:method
+   (value (server rocq--lsp-server))
+   (setf (slot-value server 'check-on-request) value)
+   (eglot-signal-didChangeConfiguration)
+   (unless value
+     (mapc #'delete-overlay rocq-mode--processing-overlays)
+     (setq rocq-mode--processing-overlays '()))))
+
+(cl-defgeneric (setf rocq-timing-data) (value server)
+  ""
+  (:method
+   (value (server rocq--lsp-server))
+   (setf (slot-value server 'timing-data) value)
+   (eglot-signal-didChangeConfiguration)
+   (unless value
+     (mapc #'delete-overlay rocq-mode--timing-overlays)
+     (setq rocq-mode--timing-overlays '()))))
+
+(cl-defgeneric (setf rocq-goal-after-tactic) (value server)
+  ""
+  (:method
+   (value (server rocq--lsp-server))
+   (setf (slot-value server 'goal-after-tactic) value)
+   (eglot-signal-didChangeConfiguration)))
+
+(defun rocq--workspace-folder-repr (folder)
   (list :uri (eglot--path-to-uri folder)
         :name (abbreviate-file-name folder)))
 
-(cl-defmethod eglot-workspace-folders ((server rocq--lsp-server))
-  (vconcat
-   (mapcar #'rocq-workspace-folder--repr
-           (rocq--workspace server))))
-
-(cl-defmethod eglot-initialization-options ((server rocq--lsp-server))
-  (let ((starting (make-hash-table :size 1)))
-    (puthash "show_coq_info_messages" :json-false starting)
-    (puthash "pp_type" 2 starting)
-    (puthash "send_perf_data" (if (rocq--timing-data server) t :json-false) starting)
-    (puthash "check_only_on_request" t starting)
-    starting))
-
-(defun rocq-add-folder-to-workspace (folder)
+(cl-defgeneric (setf rocq-workspace-folders) (value server)
   ""
+  (:method
+   (value (server rocq--lsp-server))
+   (let ((prev-val (slot-value server 'workspace-folders)))
+     (jsonrpc-notify
+      server :workspace/didChangeWorkspaceFolders
+      (list
+       :event
+       (list
+        :added (seq-into
+                (mapcar #'rocq--workspace-folder-repr (cl-set-difference value prev-val :test #'equal))
+                'vector)
+        :removed (seq-into
+                  (mapcar #'rocq--workspace-folder-repr (cl-set-difference prev-val value :test #'equal))
+                  'vector)))))
+   (setf (slot-value server 'workspace-folders) value)))
+
+(cl-defmethod eglot-workspace-folders
+  ((server rocq--lsp-server))
+  (let ((project (eglot--project server)))
+    (seq-into
+     (mapcar #'rocq--workspace-folder-repr
+             (rocq-workspace-folders server))
+     'vector)))
+
+(defun rocq-add-workspace-folder (folder)
+  "Add a folder to the workspace."
   (interactive "DSelect folder to add: ")
   (let ((server (eglot--current-server-or-lose)))
-    (if (member folder (rocq--workspace server))
+    (if (member folder (rocq-workspace-folders server))
         (message "%s is already in the Rocq workspace folders." folder)
-      (setf (rocq--workspace server) (cons folder (rocq--workspace server)))
-      (jsonrpc-notify
-       server :workspace/didChangeWorkspaceFolders
-       `(:event (:added [,(rocq-workspace-folder--repr folder)]
-                        :removed []))))))
+      (push folder (rocq-workspace-folders server)))))
+
+(defun rocq-remove-workspace-folder (folder)
+  "Remove a folder to the workspace."
+  (interactive
+   (let ((server (eglot--current-server-or-lose)))
+     (list
+      (completing-read
+       "Select folder to remove: "
+       (rocq-workspace-folders server)
+       nil t))))
+  (setf (rocq-workspace-folders server) (delete folder (rocq-workspace-folders server) :test #'equal)))
+
+(defun rocq-toggle-check-on-request ()
+  "Toggle checking on request."
+  (interactive)
+  (let* ((server (eglot--current-server-or-lose)))
+    (setf (rocq-check-on-request server) (not (rocq-check-on-request server)))))
+
+(defun rocq-toggle-timing-data ()
+  "Toggle timing data display.
+
+Which commands are considered slow and thus highlighted is governed by the
+customizable variable `rocq-mode-too-slow'."
+  (interactive)
+  (let* ((server (eglot--current-server-or-lose)))
+    (setf (rocq-timing-data server) (not (rocq-timing-data server)))))
+
+(defun rocq-toggle-goal-after-tactic ()
+  ""
+  (interactive)
+  (let* ((server (eglot--current-server-or-lose)))
+    (setf (rocq-goal-after-tactic server) (not (rocq-goal-after-tactic server)))))
 
 
 ;; Goal display
 
-(defvar rocq-goals-buffer-name
-  "*Rocq Goals*"
-  "Name of the goals buffer.")
+(define-derived-mode rocq-goals-mode magit-section-mode "Goals"
+  "Rocq Goals")
 
-(defun rocq--goals-buffer ()
-  "Return the goals buffer.  If it doesn't exist, create it."
-  (let ((existing (get-buffer rocq-goals-buffer-name)))
-    (if existing
-        existing
-      (let ((new (get-buffer-create rocq-goals-buffer-name)))
-        (display-buffer new)
-        (with-current-buffer new (magit-section-mode))
-        new))))
+(defvar-local rocq--last-goal-request-state nil)
 
 (defun rocq--goal-request-state ()
   "Builds a goal request state."
-  (list (current-buffer) (buffer-modified-tick) (point)))
+  (list (buffer-modified-tick) (point)))
 
-(defun rocq--insert-goal (goal &optional hide)
+(defface rocq-goal-face
+  `()
+  "")
+
+(defun rocq--insert-goal (goal &optional num)
   "Insert a single goal into the buffer."
   (eglot--dbind (hyps ty) goal
-    (magit-insert-section (magit-section goal hide)
+    (magit-insert-section (magit-section goal (not (and num (eql num 1))))
       (magit-insert-heading
-        (format "%s\n" ty))
+        (format "%s%s\n"
+                (if num (propertize (format "%d: " num) 'face 'bold) "")
+                (propertize ty 'face 'rocq-goal-face)))
       (mapc (eglot--lambda (names def ty)
               (mapc (lambda (name) (insert (propertize name 'face 'font-lock-variable-name-face) " "))
                     names)
@@ -110,18 +196,22 @@
   "Update the goal display."
   (interactive)
   (let ((serv (eglot--current-server-or-lose))
-        (state (rocq--goal-request-state)))
+        (state (rocq--goal-request-state))
+        (bufname (format "*Goals %s*" (buffer-name))))
     (unless (equal state
-                   (rocq--last-goal-request-state serv))
-      (setf (rocq--last-goal-request-state serv) state)
+                   rocq--last-goal-request-state)
+      (setq rocq--last-goal-request-state state)
       (jsonrpc-async-request
        serv
        :proof/goals
-       `(:textDocument ,(eglot--TextDocumentIdentifier)
-                       :position ,(eglot--pos-to-lsp-position (point)))
+       (list
+        :textDocument (eglot--TextDocumentIdentifier)
+        :position (eglot--pos-to-lsp-position (point)))
        :success-fn
        (eglot--lambda (goals messages)
-         (with-current-buffer (rocq--goals-buffer)
+         (with-current-buffer (get-buffer-create bufname)
+           (when (eq major-mode 'fundamental-mode)
+             (rocq-goals-mode))
            (let ((inhibit-read-only t))
              (erase-buffer)
              (magit-insert-section (magit-section)
@@ -129,26 +219,26 @@
                  (magit-insert-section (magit-section)
                    (magit-insert-heading
                      (format "Focused goals (%d)\n" (length goals)))
-                   (let ((hide nil))
-                     (mapc
-                      (lambda (goal)
-                        (rocq--insert-goal goal hide)
-                        (setq hide t))
-                      goals)))
+                   (cl-loop for i from 0 to (- (length goals) 1)
+                            do (rocq--insert-goal (aref goals i) (+ i 1))))
                  (newline)
                  (magit-insert-section (magit-section shelf t)
                    (magit-insert-heading
                      (format "Shelf (%d)\n" (length shelf)))
-                   (mapc #'rocq--insert-goal shelf)))
+                   (cl-loop for i from 0 to (- (length shelf) 1)
+                            do (rocq--insert-goal (aref shelf i)))))
                (newline)
                (magit-insert-section (magit-section)
                  (magit-insert-heading
                    (format "Messages (%d)\n" (length messages)))
                  (mapc (eglot--lambda (text)
                          (insert text "\n"))
-                       messages))))))))))
+                       messages))))
+           (display-buffer
+            (current-buffer)
+            `(display-buffer-reuse-mode-window . ((inhibit-same-window . ,t))))))))))
 
-(defvar rocq-mode--idle-timer
+(defvar rocq--idle-goals-timer
   nil)
 
 (defcustom rocq-mode-idle-goals-delay
@@ -156,14 +246,14 @@
   "Delay used for automatic goal refreshing."
   :type '(number))
 
-(defun rocq-mode--setup-timer ()
-  (or rocq-mode--idle-timer
+(defun rocq--setup-goals-timer ()
+  (or rocq--idle-goals-timer
       (setq
-       rocq-mode--idle-timer
+       rocq--idle-goals-timer
        (run-with-idle-timer
         rocq-mode-idle-goals-delay nil
         (lambda ()
-          (setq rocq-mode--idle-timer nil)
+          (setq rocq--idle-goals-timer nil)
           (when (eq major-mode 'rocq-mode)
             (rocq-goals)))))))
 
@@ -183,11 +273,8 @@
   "Debounce time for file progress update handling."
   :type '(number))
 
-(defun rocq--update-file-progress (cs)
-  (if-let* ((uri (car cs))
-            (textDocument (cadr cs))
-            (processing (cddr cs))
-            (path (expand-file-name (eglot--uri-to-path uri)))
+(cl-defun rocq--update-file-progress (uri &key textDocument processing)
+  (if-let* ((path (expand-file-name (eglot--uri-to-path uri)))
             (buffer (find-buffer-visiting path)))
       (with-current-buffer buffer
         (when (equal (eglot--VersionedTextDocumentIdentifier) textDocument)
@@ -206,7 +293,8 @@
                 processing)))))
 
 (defun rocq--debounced-file-progress-handling (server)
-  (mapc #'rocq--update-file-progress (rocq--pending-file-progress server))
+  (mapc (lambda (l) (apply #'rocq--update-file-progress l))
+        (rocq--pending-file-progress server))
   (setf (rocq--pending-file-progress server) '())
   (setf (rocq--pending-file-progress-timer server) nil))
 
@@ -214,11 +302,10 @@
   ((server rocq--lsp-server) (_method (eql $/coq/fileProgress)) &key textDocument processing)
   (eglot--dbind (uri) textDocument
     (unless (timerp (rocq--pending-file-progress-timer server))
-      (run-with-timer rocq-mode-file-progress-debounce-time nil #'rocq--debounced-file-progress-handling server))
-    (let* ((notifs (rocq--pending-file-progress server))
-           (notifs (assoc-delete-all uri notifs)))
-      (setf (rocq--pending-file-progress server) (cons (cons uri (cons textDocument processing)) notifs)))
-))
+      (run-with-timer rocq-mode-file-progress-debounce-time
+                      nil #'rocq--debounced-file-progress-handling server))
+    (setf (alist-get uri (rocq--pending-file-progress server) nil nil #'equal)
+          (list :textDocument textDocument :processing processing))))
 
 
 ;; Timing data display
@@ -246,6 +333,7 @@ considered slow."
         (with-current-buffer buffer
           (when (equal (eglot--VersionedTextDocumentIdentifier) textDocument)
             (mapc #'delete-overlay rocq-mode--timing-overlays)
+            (setq rocq-mode--timing-overlays '())
             (mapc (eglot--lambda (range info)
                     (eglot--dbind (time memory cache_hit time_hash) info
                       (when (>= time rocq-mode-too-slow)
@@ -260,23 +348,6 @@ considered slow."
                               (overlay-put overlay 'face 'rocq-mode-slow-face)))))))
                   timings))))))
 
-
-(defun rocq-toggle-timing-data ()
-  "Toggle timing data display.
-
-Which commands are considered slow and thus highlighted is governed by the
-customizable variable `rocq-mode-too-slow'."
-  (interactive)
-  (let* ((server (eglot--current-server-or-lose))
-         (prev-val (rocq--timing-data server)))
-    (setf (rocq--timing-data server) (not prev-val))
-    (jsonrpc-notify
-     server :workspace/didChangeConfiguration
-     `(:settings ,(eglot-initialization-options server)))
-    (when prev-val
-      (mapc #'delete-overlay rocq-mode--timing-overlays)
-      (setq rocq-mode--timing-overlays '()))))
-
 
 ;; Misc commands
 
@@ -286,7 +357,8 @@ customizable variable `rocq-mode-too-slow'."
   (let ((server (eglot--current-server-or-lose)))
     (jsonrpc-async-request
      server :coq/saveVo
-     `(:textDocument ,(eglot--VersionedTextDocumentIdentifier))
+     (list
+      :textDocument (eglot--VersionedTextDocumentIdentifier))
      :success-fn
      (lambda (_) (message "%s"
                           (propertize "Successfully saved .vo file"
@@ -302,7 +374,8 @@ customizable variable `rocq-mode-too-slow'."
   (let ((server (eglot--current-server-or-lose)))
     (jsonrpc-async-request
      server :coq/saveVo
-     `(:textDocument ,(eglot--VersionedTextDocumentIdentifier))
+     (list
+      :textDocument (eglot--VersionedTextDocumentIdentifier))
      :success-fn
      (lambda (_) (message "%s"
                           (propertize "Successfully trimmed memory"
@@ -330,9 +403,11 @@ customizable variable `rocq-mode-too-slow'."
       (let ((server (eglot--current-server-or-lose)))
         (jsonrpc-notify
          server :coq/viewRange
-         `(:textDocument ,(eglot--VersionedTextDocumentIdentifier)
-           :range (:start ,(eglot--pos-to-lsp-position dstart)
-                          :end ,(eglot--pos-to-lsp-position dend))))))))
+         (list
+          :textDocument (eglot--VersionedTextDocumentIdentifier)
+          :range (list
+                  :start (eglot--pos-to-lsp-position dstart)
+                  :end (eglot--pos-to-lsp-position dend))))))))
 
 (defun rocq-mode--scroll-function (window _)
   (when (timerp rocq-mode--scroll-timer)
@@ -362,10 +437,27 @@ customizable variable `rocq-mode-too-slow'."
              ((not (member rocq-proj-dir (rocq--workspace server)))))
     (rocq-add-folder-to-workspace rocq-proj-dir))
   (eglot-ensure)
-  (add-hook 'post-command-hook #'rocq-mode--setup-timer)
-  (add-hook 'window-scroll-functions #'rocq-mode--scroll-function 0 t)
   (setq-local comment-start "(*"
               comment-end "*)"
               comment-style 'multi-line))
+
+(define-minor-mode rocq-follow-viewport-mode
+  "Send notifications of the viewport position to coq-lsp."
+  :init-value nil
+  :global nil
+  (if rocq-follow-viewport-mode
+      (progn
+        (add-hook 'window-scroll-functions #'rocq-mode--scroll-function 0 t)
+        (rocq-mode--update-view (selected-window)))
+    (remove-hook 'window-scroll-functions #'rocq-mode--scroll-function)))
+
+(define-minor-mode rocq-auto-goals-at-point-mode
+  "Automatically request goals at point."
+  :init-value nil
+  :global nil
+  (if rocq-auto-goals-at-point-mode
+      (progn
+        (add-hook 'post-command-hook #'rocq--setup-goals-timer 0 t))
+    (remove-hook 'post-command-hook #'rocq--setup-goals-timer t)))
 
 (provide 'rocq-mode)
