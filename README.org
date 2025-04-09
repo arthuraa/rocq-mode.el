@@ -7,12 +7,38 @@ This package depends on [[https://github.com/joaotavora/eglot][Eglot]] for its L
 structured goal display.
 
 * Features
-- Structured goal display using magit-section, automatically refreshing based on
-  cursor position (other workflows possible, we can discuss them);
+- Structured goal display using magit-section;
 - Processing overlay indicator;
 - Displaying of slow commands;
-- Automatic addition of other folders containing a =_CoqProject= file to the workspace;
-- Misc. =coq-lsp= commands like =rocq-trim= and =rocq-save-vo=.
+- Automatic addition of other folders containing a ~_CoqProject~ file to the workspace;
+- Instant switching between on-demand and continuous mode;
+- Misc. =coq-lsp= commands like ~rocq-trim~ and ~rocq-save-vo~.
+
+* Configuration
+The recommended configuration is via ~use-package~ (see [[https://www.gnu.org/software/emacs/manual/html_mono/use-package.html][use-package's documentation]]), using the ~:vc~ keyword.
+Here is an example configuration enabling ~rocq-mode~ by default with =.v= files, as well as enabling viewport following and automatic goal request.
+#+begin_src emacs-lisp
+  (use-package rocq-mode
+    :vc (:url "https://codeberg.org/jpoiret/rocq-mode.el.git"
+         :rev :newest)
+    :mode "\\.v\\'"
+    :hook
+    (rocq-mode . rocq-follow-viewport-mode)
+    (rocq-mode . rocq-auto-goals-at-point-mode))
+#+end_src
+
+~rocq-follow-viewport-mode~ is a minor mode that sends viewport notifications to =coq-lsp=, so that it will process only what is visible.
+
+~rocq-auto-goals-at-point-mode~ is a minor mode that automatically asks for goal display at point after idling for ~rocq-mode-idle-goals-delay~.
+Feel free to liberally toggle it to make the corresponding goal window keep its current display.
+
+If you want to turn off on-demand checking (to go back to continuous mode), use ~rocq-toggle-check-on-request~.
+To highlight slow commands, use ~rocq-toggle-timing-data~, and to toggle whether the goals being requested are shown before or after the sentence under point is executed, use ~rocq-toggle-goal-after-tactic~.
+Note that these changes are global to the =coq-lsp= session.
+You can change the default slots of ~rocq--lsp-server~ corresponding to these options using ~oset-default~, but note there is no analogue of ~setq-local~ for this, so these changes are global and not retroactive on started =coq-lsp= sessions.
+
+* Wishlist
+- Syntax highlighting.
 
 * Disclaimer
 This package is a very early work-in-progress, tailored to my specific needs for
