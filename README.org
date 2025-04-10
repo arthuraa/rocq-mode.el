@@ -31,6 +31,7 @@ Here is an example configuration enabling ~rocq-mode~ by default with =.v= files
 
 ~rocq-auto-goals-at-point-mode~ is a minor mode that automatically asks for goal display at point after idling for ~rocq-mode-idle-goals-delay~.
 Feel free to liberally toggle it to make the corresponding goal window keep its current display.
+You can also use ~rocq-goals~ to manually request goal display.
 
 If you want to turn off on-demand checking (to go back to continuous mode), use ~rocq-toggle-check-on-request~.
 To highlight slow commands, use ~rocq-toggle-timing-data~, and to toggle whether the goals being requested are shown before or after the sentence under point is executed, use ~rocq-toggle-goal-after-tactic~.
@@ -39,6 +40,7 @@ You can change the default slots of ~rocq--lsp-server~ corresponding to these op
 
 * Wishlist
 - Syntax highlighting.
+- Display last goal request position (would need more info from =coq-lsp=).
 
 * Disclaimer
 This package is a very early work-in-progress, tailored to my specific needs for
