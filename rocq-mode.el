@@ -55,6 +55,7 @@
 
 (cl-defmethod eglot-initialization-options ((server rocq--lsp-server))
   (list
+   :goal_after_tactic (if (rocq-goal-after-tactic server) t :json-false)
    :show_coq_info_messages :json-false
    :pp_type 0
    :send_perf_data (if (rocq-timing-data server) t :json-false)
@@ -65,7 +66,7 @@
   (:method
    (value (server rocq--lsp-server))
    (setf (slot-value server 'check-on-request) value)
-   (eglot-signal-didChangeConfiguration)
+   (eglot-signal-didChangeConfiguration server)
    (unless value
      (mapc #'delete-overlay rocq-mode--processing-overlays)
      (setq rocq-mode--processing-overlays '()))))
@@ -75,7 +76,7 @@
   (:method
    (value (server rocq--lsp-server))
    (setf (slot-value server 'timing-data) value)
-   (eglot-signal-didChangeConfiguration)
+   (eglot-signal-didChangeConfiguration server)
    (unless value
      (mapc #'delete-overlay rocq-mode--timing-overlays)
      (setq rocq-mode--timing-overlays '()))))
@@ -85,7 +86,7 @@
   (:method
    (value (server rocq--lsp-server))
    (setf (slot-value server 'goal-after-tactic) value)
-   (eglot-signal-didChangeConfiguration)))
+   (eglot-signal-didChangeConfiguration server)))
 
 (defun rocq--workspace-folder-repr (folder)
   (list :uri (eglot--path-to-uri folder)
