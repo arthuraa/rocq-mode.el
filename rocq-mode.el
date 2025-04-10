@@ -56,7 +56,7 @@
 (cl-defmethod eglot-initialization-options ((server rocq--lsp-server))
   (list
    :show_coq_info_messages :json-false
-   :pp_type 2
+   :pp_type 0
    :send_perf_data (if (rocq-timing-data server) t :json-false)
    :check_only_on_request (if (rocq-check-on-request server) t :json-false)))
 
