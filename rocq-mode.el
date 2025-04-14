@@ -396,25 +396,26 @@ considered slow."
 
 (defvar rocq-mode--scroll-timer nil)
 
-(defun rocq-mode--update-view (window)
+(defun rocq-mode--update-view (dstart dend buffer)
   (setq rocq-mode--scroll-timer nil)
-  (let ((dstart (window-group-start window))
-        (dend (window-group-end window t)))
-    (with-selected-window window
-      (let ((server (eglot--current-server-or-lose)))
-        (jsonrpc-notify
-         server :coq/viewRange
-         (list
-          :textDocument (eglot--VersionedTextDocumentIdentifier)
-          :range (list
-                  :start (eglot--pos-to-lsp-position dstart)
-                  :end (eglot--pos-to-lsp-position dend))))))))
+  (with-current-buffer buffer
+    (let ((server (eglot--current-server-or-lose)))
+      (jsonrpc-notify
+       server :coq/viewRange
+       (list
+        :textDocument (eglot--VersionedTextDocumentIdentifier)
+        :range (list
+                :start (eglot--pos-to-lsp-position dstart)
+                :end (eglot--pos-to-lsp-position dend)))))))
 
 (defun rocq-mode--scroll-function (window _)
   (when (timerp rocq-mode--scroll-timer)
     (cancel-timer rocq-mode--scroll-timer))
   (setq rocq-mode--scroll-timer
-        (run-at-time rocq-mode-scroll-delay nil #'rocq-mode--update-view window)))
+        (run-at-time rocq-mode-scroll-delay nil #'rocq-mode--update-view
+                     (window-group-start window)
+                     (window-group-end window t)
+                     (window-buffer window))))
 
 
 
