@@ -66,10 +66,7 @@
   (:method
    (value (server rocq--lsp-server))
    (setf (slot-value server 'check-on-request) value)
-   (eglot-signal-didChangeConfiguration server)
-   (unless value
-     (mapc #'delete-overlay rocq-mode--processing-overlays)
-     (setq rocq-mode--processing-overlays '()))))
+   (eglot-signal-didChangeConfiguration server)))
 
 (cl-defgeneric (setf rocq-timing-data) (value server)
   ""
@@ -78,8 +75,11 @@
    (setf (slot-value server 'timing-data) value)
    (eglot-signal-didChangeConfiguration server)
    (unless value
-     (mapc #'delete-overlay rocq-mode--timing-overlays)
-     (setq rocq-mode--timing-overlays '()))))
+     (mapc
+      (lambda (buffer)
+        (mapc #'delete-overlay rocq-mode--timing-overlays)
+        (setq rocq-mode--timing-overlays '()))
+      (eglot--managed-buffers server)))))
 
 (cl-defgeneric (setf rocq-goal-after-tactic) (value server)
   ""
