@@ -428,12 +428,20 @@ considered slow."
     (modify-syntax-entry ?\) ")(4" st)
     st))
 
+(defvar-keymap rocq-mode-map
+  :doc "Keymap for Rocq interaction."
+  "C-c C-," #'rocq-goals)
+
 ;;;###autoload
 (with-eval-after-load 'eglot
   (add-to-list 'eglot-server-programs (cons 'rocq-mode (list 'rocq--lsp-server "coq-lsp"))))
 
 ;;;###autoload
 (define-derived-mode rocq-mode prog-mode "Rocq"
+  "Major mode for Rocq files, using coq-lsp.
+
+Key bindings:
+\\{rocq-mode-map}"
   (when-let ((server (eglot-current-server))
              (rocq-proj-dir (locate-dominating-file (buffer-file-name) "_CoqProject"))
              ((not (member rocq-proj-dir (rocq--workspace server)))))
