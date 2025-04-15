@@ -444,8 +444,8 @@ Key bindings:
 \\{rocq-mode-map}"
   (when-let ((server (eglot-current-server))
              (rocq-proj-dir (locate-dominating-file (buffer-file-name) "_CoqProject"))
-             ((not (member rocq-proj-dir (rocq--workspace server)))))
-    (rocq-add-folder-to-workspace rocq-proj-dir))
+             ((not (member rocq-proj-dir (rocq-workspace-folders server)))))
+    (rocq-add-workspace-folder rocq-proj-dir))
   (eglot-ensure)
   (setq-local comment-start "(*"
               comment-end "*)"
