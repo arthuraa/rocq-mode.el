@@ -13,6 +13,8 @@
 (require 'eglot)
 (require 'magit-section)
 
+(require 'rocq-syntax)
+
 
 ;; LSP implementation
 
@@ -417,7 +419,6 @@ considered slow."
                      (window-group-end window t)
                      (window-buffer window))))
 
-
 
 ;; General mode setup
 
@@ -449,7 +450,14 @@ Key bindings:
   (eglot-ensure)
   (setq-local comment-start "(*"
               comment-end "*)"
-              comment-style 'multi-line))
+              comment-style 'multi-line)
+  (setq font-lock-defaults
+        `(((,(regexp-opt rocq-vernac-commands 'symbols) . 'rocq-vernac-commands)
+           (,(regexp-opt rocq-gallina-keywords 'symbols) . 'rocq-gallina-keywords)
+           (,(regexp-opt rocq-sorts 'symbols) . 'rocq-sorts)
+           (,(regexp-opt rocq-tactics 'symbols) . 'rocq-tactics)
+           (,(regexp-opt rocq-terminators 'symbols) . 'rocq-terminators)
+           (,(regexp-opt rocq-control 'symbols) . 'rocq-control)))))
 
 (define-minor-mode rocq-follow-viewport-mode
   "Send notifications of the viewport position to coq-lsp."
