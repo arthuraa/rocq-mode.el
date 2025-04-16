@@ -401,7 +401,7 @@ considered slow."
 (defun rocq-mode--update-view (dstart dend buffer)
   (setq rocq-mode--scroll-timer nil)
   (with-current-buffer buffer
-    (let ((server (eglot--current-server-or-lose)))
+    (when-let ((server (eglot-current-server)))
       (jsonrpc-notify
        server :coq/viewRange
        (list
