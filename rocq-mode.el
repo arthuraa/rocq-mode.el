@@ -466,7 +466,7 @@ Key bindings:
   (if rocq-follow-viewport-mode
       (progn
         (add-hook 'window-scroll-functions #'rocq-mode--scroll-function 0 t)
-        (rocq-mode--update-view (selected-window)))
+        (rocq-mode--update-view (window-group-start) (window-group-end) (window-buffer)))
     (remove-hook 'window-scroll-functions #'rocq-mode--scroll-function)))
 
 (define-minor-mode rocq-auto-goals-at-point-mode
