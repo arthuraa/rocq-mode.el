@@ -155,7 +155,7 @@ customizable variable `rocq-mode-too-slow'."
     (setf (rocq-timing-data server) (not (rocq-timing-data server)))))
 
 (defun rocq-toggle-goal-after-tactic ()
-  ""
+  "Toggle whether the sentence under point is run when requesting state."
   (interactive)
   (let* ((server (eglot--current-server-or-lose)))
     (setf (rocq-goal-after-tactic server) (not (rocq-goal-after-tactic server)))))
@@ -174,7 +174,7 @@ customizable variable `rocq-mode-too-slow'."
 
 (defface rocq-goal-face
   `()
-  "")
+  "Face for Rocq goals.")
 
 (defun rocq--insert-goal (goal &optional num)
   "Insert a single goal into the buffer."
@@ -269,7 +269,7 @@ customizable variable `rocq-mode-too-slow'."
 
 (defface rocq-mode-processing-face
   `((t :background "light gray"))
-  "")
+  "Face highlighting unprocessed Rocq code.")
 
 (defcustom rocq-mode-file-progress-debounce-time
   0.2
