@@ -168,6 +168,8 @@ customizable variable `rocq-mode-too-slow'."
 
 (defvar-local rocq--last-goal-request-state nil)
 
+(defvar-local rocq--last-goal-overlay nil)
+
 (defun rocq--goal-request-state ()
   "Builds a goal request state."
   (list (buffer-modified-tick) (point)))
@@ -175,6 +177,19 @@ customizable variable `rocq-mode-too-slow'."
 (defface rocq-goal-face
   `()
   "Face for Rocq goals.")
+
+(defface rocq-mode-last-goal-request
+  `((t :background "DarkSeaGreen1"))
+  "Face for sentence of last goal request.")
+
+(defun rocq-go-to-last-goal-request ()
+  (interactive)
+  (if-let* ((overlay rocq--last-goal-overlay)
+            (pos (overlay-start overlay)))
+      (goto-char pos)
+    (message "%s"
+             (propertize "No last goal request to go back to."
+                         'face 'error))))
 
 (defun rocq--insert-goal (goal &optional num)
   "Insert a single goal into the buffer."
@@ -200,7 +215,8 @@ customizable variable `rocq-mode-too-slow'."
   (interactive)
   (let ((serv (eglot--current-server-or-lose))
         (state (rocq--goal-request-state))
-        (bufname (format "*Goals %s*" (buffer-name))))
+        (buf (current-buffer))
+        (goal-bufname (format "*Goals %s*" (buffer-name))))
     (unless (equal state
                    rocq--last-goal-request-state)
       (setq rocq--last-goal-request-state state)
@@ -211,8 +227,19 @@ customizable variable `rocq-mode-too-slow'."
         :textDocument (eglot--TextDocumentIdentifier)
         :position (eglot--pos-to-lsp-position (point)))
        :success-fn
-       (eglot--lambda (goals messages)
-         (with-current-buffer (get-buffer-create bufname)
+       (eglot--lambda (textDocument range goals messages)
+         (with-current-buffer buf
+           (unless rocq--last-goal-overlay
+             (setq rocq--last-goal-overlay (make-overlay 1 1))
+             (overlay-put rocq--last-goal-overlay 'face 'rocq-mode-last-goal-request))
+           (if range
+               (when (equal (eglot--VersionedTextDocumentIdentifier) textDocument)
+                 (eglot--dbind (start end) range
+                   (move-overlay rocq--last-goal-overlay
+                                 (eglot--lsp-position-to-point start)
+                                 (eglot--lsp-position-to-point end))))
+             (delete-overlay rocq--last-goal-overlay)))
+         (with-current-buffer (get-buffer-create goal-bufname)
            (when (eq major-mode 'fundamental-mode)
              (rocq-goals-mode))
            (let ((inhibit-read-only t))
@@ -431,7 +458,8 @@ considered slow."
 
 (defvar-keymap rocq-mode-map
   :doc "Keymap for Rocq interaction."
-  "C-c C-," #'rocq-goals)
+  "C-c C-," #'rocq-goals
+  "C-c C-M-," #'rocq-go-to-last-goal-request)
 
 ;;;###autoload
 (with-eval-after-load 'eglot
