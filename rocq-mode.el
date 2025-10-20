@@ -61,7 +61,8 @@
    :show_coq_info_messages :json-false
    :pp_type 0
    :send_perf_data (if (rocq-timing-data server) t :json-false)
-   :check_only_on_request (if (rocq-check-on-request server) t :json-false)))
+   :check_only_on_request (if (rocq-check-on-request server) t :json-false)
+   :messages_follow_goal t))
 
 (cl-defgeneric (setf rocq-check-on-request) (value server)
   ""
