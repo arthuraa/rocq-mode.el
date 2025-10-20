@@ -246,10 +246,18 @@ customizable variable `rocq-mode-too-slow'."
            (let ((inhibit-read-only t))
              (erase-buffer)
              (magit-insert-section (magit-section)
-               (eglot--dbind (goals shelf) goals
+               (eglot--dbind (goals stack shelf) goals
                  (magit-insert-section (magit-section)
                    (magit-insert-heading
-                     (format "Focused goals (%d)\n" (length goals)))
+                     (let ((l (length goals)))
+                       (format "Focused goals (%d/%d)\n"
+                               l
+                               (apply #'+
+                                      l
+                                      (seq-map
+                                       (lambda (x)
+                                         (+ (length (elt x 0)) (length (elt x 1))))
+                                       stack)))))
                    (cl-loop for i from 0 to (- (length goals) 1)
                             do (rocq--insert-goal (aref goals i) (+ i 1))))
                  (newline)
