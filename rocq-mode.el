@@ -165,7 +165,8 @@ customizable variable `rocq-mode-too-slow'."
 ;; Goal display
 
 (define-derived-mode rocq-goals-mode magit-section-mode "Goals"
-  "Rocq Goals")
+  "Rocq Goals"
+  (rocq--setup-font-lock))
 
 (defvar-local rocq--last-goal-request-state nil)
 
@@ -197,18 +198,21 @@ customizable variable `rocq-mode-too-slow'."
   (eglot--dbind (hyps ty) goal
     (magit-insert-section (magit-section goal (not (and num (eql num 1))))
       (magit-insert-heading
-        (format "%s%s\n"
-                (if num (propertize (format "%d: " num) 'face 'bold) "")
-                (propertize ty 'face 'rocq-goal-face)))
+        (concat
+         (if num (propertize (format "%d: " num) 'font-lock-face 'bold) "")
+         (propertize ty 'face 'rocq-goal-face)))
       (mapc (eglot--lambda (names def ty)
-              (mapc (lambda (name) (insert (propertize name 'face 'font-lock-variable-name-face) " "))
-                    names)
-              (when def
-                (insert ":= " def "\n"))
+              (mapc
+               (lambda (name)
+                 (insert (propertize name 'font-lock-face 'font-lock-variable-name-face) " "))
+               names)
               (let ((pt (point)))
+                (when def
+                  (insert ":= " def "\n"))
                 (insert ": " ty "\n")
                 (indent-region pt (point) 2)))
-            hyps))))
+            hyps))
+    (insert "\n")))
 
 ;;;###autoload
 (defun rocq-goals ()
@@ -474,6 +478,16 @@ considered slow."
 (with-eval-after-load 'eglot
   (add-to-list 'eglot-server-programs (cons 'rocq-mode (list 'rocq--lsp-server "coq-lsp"))))
 
+(defun rocq--setup-font-lock ()
+    ""
+  (setq font-lock-defaults
+        `(((,(regexp-opt rocq-vernac-commands 'symbols) . 'rocq-vernac-commands)
+           (,(regexp-opt rocq-gallina-keywords 'symbols) . 'rocq-gallina-keywords)
+           (,(regexp-opt rocq-sorts 'symbols) . 'rocq-sorts)
+           (,(regexp-opt rocq-tactics 'symbols) . 'rocq-tactics)
+           (,(regexp-opt rocq-terminators 'symbols) . 'rocq-terminators)
+           (,(regexp-opt rocq-control 'symbols) . 'rocq-control)))))
+
 ;;;###autoload
 (define-derived-mode rocq-mode prog-mode "Rocq"
   "Major mode for Rocq files, using coq-lsp.
@@ -488,13 +502,7 @@ Key bindings:
   (setq-local comment-start "(*"
               comment-end "*)"
               comment-style 'multi-line)
-  (setq font-lock-defaults
-        `(((,(regexp-opt rocq-vernac-commands 'symbols) . 'rocq-vernac-commands)
-           (,(regexp-opt rocq-gallina-keywords 'symbols) . 'rocq-gallina-keywords)
-           (,(regexp-opt rocq-sorts 'symbols) . 'rocq-sorts)
-           (,(regexp-opt rocq-tactics 'symbols) . 'rocq-tactics)
-           (,(regexp-opt rocq-terminators 'symbols) . 'rocq-terminators)
-           (,(regexp-opt rocq-control 'symbols) . 'rocq-control)))))
+  (rocq--setup-font-lock))
 
 (define-minor-mode rocq-follow-viewport-mode
   "Send notifications of the viewport position to coq-lsp."
