@@ -8,7 +8,7 @@
 (defvar rocq-vernac-commands
   '("Section" "Module" "End" "Require" "Import" "Export" "Include" "Variable"
     "Variables" "Parameter" "Parameters" "Axiom" "Axioms" "Hypothesis"
-    "Hypotheses" "Notation" "Local" "Tactic" "Reserved" "Scope"
+    "Hypotheses" "Notation" "Infix" "Reserved Notation" "Local" "Tactic" "Reserved" "Scope"
     "Open" "Close" "Bind" "Declare" "Delimit" "Definition" "Example" "Let"
     "Ltac" "Ltac2" "Fixpoint" "CoFixpoint" "Morphism" "Relation" "Implicit"
     "Arguments" "Types" "Contextual" "Strict" "Prenex"
@@ -21,7 +21,8 @@
     "outside" "Check" "Global" "Instance" "Class" "Existing"
     "Universe" "Polymorphic" "Monomorphic" "Context" "Scheme" "From"
     "Undo" "Fail" "Function" "Program" "Elpi" "Extract" "Opaque"
-    "Transparent" "Unshelve" "Next Obligation"))
+    "Transparent" "Unshelve" "Next Obligation" "Equations"
+    "MetaRocq Run" "MetaRocq Erase"))
 
 ;; Gallina
 (defface rocq-gallina-keywords
@@ -31,7 +32,8 @@
 (defvar rocq-gallina-keywords
   '("forall" "exists" "exists2" "fun" "fix" "cofix" "struct"
     "match" "end"  "in" "return" "let" "if" "is" "then" "else"
-    "for" "of" "nosimpl" "with" "as"))
+    "for" "of" "nosimpl" "with" "as"
+    "by wf"))
 
 ;; Sorts
 (defface rocq-sorts
@@ -56,7 +58,8 @@
     "split" "left" "right" "autorewrite" "tauto" "setoid_rewrite"
     "intuition" "eauto" "eapply" "econstructor" "etransitivity"
     "constructor" "erewrite" "red" "cbv" "lazy" "vm_compute"
-    "native_compute" "subst"))
+    "native_compute" "subst"
+    "depelim" "depind" "funelim"))
 
 ;; Terminators
 (defface rocq-terminators
