@@ -412,6 +412,15 @@ considered slow."
                                       'face 'error)
                           "Maybe you haven't finished checking the whole file?")))))
 
+(defun rocq-reload-vos ()
+  "Ask coq-lsp to reload currently loaded vo files."
+  (interactive)
+  (let ((server (eglot--current-server-or-lose)))
+    (jsonrpc-notify
+     server :coq/workspace_update
+     (list
+      :textDocument (eglot--VersionedTextDocumentIdentifier)))))
+
 (defun rocq-trim ()
   "Ask coq-lsp to free memory."
   (interactive)
