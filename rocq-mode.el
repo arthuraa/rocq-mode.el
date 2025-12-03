@@ -474,7 +474,9 @@ considered slow."
 (defvar-keymap rocq-mode-map
   :doc "Keymap for Rocq interaction."
   "C-c C-," #'rocq-goals
-  "C-c C-M-," #'rocq-go-to-last-goal-request)
+  "C-c C-M-," #'rocq-go-to-last-goal-request
+  "C-c C-s" #'rocq-save-vo
+  "C-c C-r" #'rocq-reload-vos)
 
 ;;;###autoload
 (with-eval-after-load 'eglot
