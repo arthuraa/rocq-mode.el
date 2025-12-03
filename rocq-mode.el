@@ -177,7 +177,7 @@ customizable variable `rocq-mode-too-slow'."
   (list (buffer-modified-tick) (point)))
 
 (defface rocq-goal-face
-  `()
+  `((t (:underline (:color foreground-color :style line :position t))))
   "Face for Rocq goals.")
 
 (defface rocq-mode-last-goal-request
@@ -200,7 +200,7 @@ customizable variable `rocq-mode-too-slow'."
       (magit-insert-heading
         (concat
          (if num (propertize (format "%d: " num) 'font-lock-face 'bold) "")
-         (propertize ty 'face 'rocq-goal-face)))
+         (propertize ty 'font-lock-face 'rocq-goal-face)))
       (mapc (eglot--lambda (names def ty)
               (mapc
                (lambda (name)
