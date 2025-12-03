@@ -416,18 +416,10 @@ considered slow."
   "Ask coq-lsp to free memory."
   (interactive)
   (let ((server (eglot--current-server-or-lose)))
-    (jsonrpc-async-request
-     server :coq/saveVo
+    (jsonrpc-notify
+     server :coq/trimCaches
      (list
-      :textDocument (eglot--VersionedTextDocumentIdentifier))
-     :success-fn
-     (lambda (_) (message "%s"
-                          (propertize "Successfully trimmed memory"
-                                      'face 'success)))
-     :error-fn
-     (lambda (_) (message "%s"
-                          (propertize "Failed to trim memory"
-                                      'face 'error))))))
+      :textDocument (eglot--VersionedTextDocumentIdentifier)))))
 
 
 ;; Update view
