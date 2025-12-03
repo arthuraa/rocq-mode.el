@@ -3,6 +3,8 @@
 =rocq-mode= is an Emacs mode for the Rocq theorem prover, using [[https://github.com/ejgallego/coq-lsp][coq-lsp]] under
 the hood, licensed under the GPLv3 or later.
 
+Only the latest =coq-lsp= version (2.5.0) is supported.
+
 This package depends on [[https://github.com/joaotavora/eglot][Eglot]] for its LSP support, and [[https://github.com/magit/magit/blob/main/lisp/magit-section.el][magit-section]] for the
 structured goal display.
 
@@ -12,7 +14,7 @@ structured goal display.
 - Displaying of slow commands;
 - Automatic addition of other folders containing a ~_CoqProject~ file to the workspace;
 - Instant switching between on-demand and continuous mode;
-- Misc. =coq-lsp= commands like ~rocq-trim~ and ~rocq-save-vo~.
+- Misc. =coq-lsp= commands like ~rocq-trim~, ~rocq-save-vo~ and ~rocq-reload-vos~.
 
 * Configuration
 The recommended configuration is via ~use-package~ (see [[https://www.gnu.org/software/emacs/manual/html_mono/use-package.html][use-package's documentation]]), using the ~:vc~ keyword.
@@ -38,9 +40,16 @@ To highlight slow commands, use ~rocq-toggle-timing-data~, and to toggle whether
 Note that these changes are global to the =coq-lsp= session.
 You can change the default slots of ~rocq--lsp-server~ corresponding to these options using ~oset-default~, but note there is no analogue of ~setq-local~ for this, so these changes are global and not retroactive on started =coq-lsp= sessions.
 
+* Default keymap
+| Keybinding  | Command                        |
+|-------------+--------------------------------|
+| ~C-c C-,~   | ~rocq-goals~                   |
+| ~C-c C-M-,~ | ~rocq-go-to-last-goal-request~ |
+| ~C-c C-s~   | ~rocq-save-vo~                 |
+| ~C-c C-r~   | ~rocq-reload-vos~              |
+
 * Wishlist
-- Syntax highlighting.
-- Display last goal request position (would need more info from =coq-lsp=).
+- ??
 
 * Disclaimer
 This package is a very early work-in-progress, tailored to my specific needs for
