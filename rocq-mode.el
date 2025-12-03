@@ -407,9 +407,10 @@ considered slow."
                           (propertize "Successfully saved .vo file"
                                       'face 'success)))
      :error-fn
-     (lambda (_) (message "%s"
+     (lambda (_) (message "%s\n%s"
                           (propertize "Failed saving .vo file"
-                                      'face 'error))))))
+                                      'face 'error)
+                          "Maybe you haven't finished checking the whole file?")))))
 
 (defun rocq-trim ()
   "Ask coq-lsp to free memory."
