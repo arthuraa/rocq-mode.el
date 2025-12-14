@@ -2,7 +2,7 @@
 
 ;; Author: Josselin Poiret <dev@jpoiret.xyz>
 ;; Version: 0.1
-;; Package-Requires: ((eglot "1.12") (magit-section "3.0"))
+;; Package-Requires: ((eglot "1.12"))
 ;; Keywords: coq, rocq
 ;; URL: https://codeberg.org/jpoiret/rocq-mode.el
 
@@ -11,7 +11,6 @@
 ;;; Code:
 
 (require 'eglot)
-(require 'magit-section)
 
 (require 'rocq-syntax)
 
@@ -164,43 +163,126 @@ customizable variable `rocq-mode-too-slow'."
 
 ;; Goal display
 
-(define-derived-mode rocq-goals-mode magit-section-mode "Goals"
-  "Rocq Goals"
+(defcustom rocq-top-goal
+  t
+  "Whether to show the goal at the top or bottom."
+  :type '(choice (const :tag "Display goal at the top" t)
+                 (const :tag "Display goal at the bottom" nil)))
+
+(defcustom rocq-show-stack
+  nil
+  "Whether to show the full goal stack."
+  :type '(choice (const :tag "Show the stack" t)
+                 (const :tag "Don't show the stack" nil))
+  :local t)
+
+(defun rocq-toggle-show-stack ()
+  ""
+  (interactive)
+  (setq rocq-show-stack (not rocq-show-stack))
+  (rocq-refresh-status))
+
+(defcustom rocq-show-shelf
+  nil
+  "Whether to show the shelf."
+  :type '(choice (const :tag "Show the shelf" t)
+                 (const :tag "Don't show the shelf" nil))
+  :local t)
+
+(defun rocq-toggle-show-shelf ()
+  ""
+  (interactive)
+  (setq rocq-show-shelf (not rocq-show-shelf))
+  (rocq-refresh-status))
+
+(defun rocq-show-messages ()
+  ""
+  (interactive)
+  (setq rocq--selected-goal nil)
+  (rocq-refresh-status))
+
+(defvar-keymap rocq-status-mode-map
+  :doc "Keymap for Rocq interaction."
+  "RET" #'rocq-select-goal
+  "s f" #'rocq-toggle-show-stack
+  "s s" #'rocq-toggle-show-shelf
+  "m" #'rocq-show-messages)
+
+(define-derived-mode rocq-status-mode special-mode "Rocq Status"
+  "Rocq Status"
   (rocq--setup-font-lock))
 
-(defvar-local rocq--last-goal-request-state nil)
+(define-derived-mode rocq-goal-mode special-mode "Rocq Goal"
+  "Rocq Goal"
+  (rocq--setup-font-lock))
 
-(defvar-local rocq--last-goal-overlay nil)
+(defun rocq--status-buffer (buf)
+  ""
+  (unless (with-current-buffer buf
+            (derived-mode-p '(rocq-mode)))
+    (error "Buffer is not a Rocq buffer."))
+  (get-buffer-create
+   (format "*Rocq Status %s*" (buffer-name buf))))
+
+(defun rocq-switch-to-status ()
+  "Switch to the status buffer for the current Rocq buffer, displaying it if needed."
+  (interactive)
+  (when-let
+      ((action-alist
+        `((,#'display-buffer-reuse-mode-window
+           ,#'display-buffer-below-selected)
+          (mode . rocq-status-mode)))
+       (window
+        (display-buffer
+         (rocq--status-buffer (current-buffer))
+         action-alist)))
+    (select-window window)
+    (let ((fit-window-to-buffer-horizontally nil)
+              (window-resize-pixelwise t))
+          (fit-window-to-buffer window nil 0))))
+
+(defvar-local rocq--last-request-state nil)
+(defvar-local rocq--last-request-overlay nil)
+
+(defvar-local rocq--goals nil)
+(defvar-local rocq--messages nil)
+(defvar-local rocq--selected-goal nil)
 
 (defun rocq--goal-request-state ()
   "Builds a goal request state."
   (list (buffer-modified-tick) (point)))
 
 (defface rocq-goal-face
-  `((t (:underline (:color foreground-color :style line :position t))))
+  `()
   "Face for Rocq goals.")
 
-(defface rocq-mode-last-goal-request
+(defface rocq-mode-last-request
   `((t :background "DarkSeaGreen1"))
   "Face for sentence of last goal request.")
 
-(defun rocq-go-to-last-goal-request ()
+(defun rocq-go-to-last-request ()
   (interactive)
-  (if-let* ((overlay rocq--last-goal-overlay)
+  (if-let* ((overlay rocq--last-request-overlay)
             (pos (overlay-start overlay)))
       (goto-char pos)
     (message "%s"
              (propertize "No last goal request to go back to."
                          'face 'error))))
 
+(defun rocq--insert-separator ()
+  "Insert a separator between hypotheses and goal."
+  (insert
+   (make-string 6 ?─))
+  (newline))
+
 (defun rocq--insert-goal (goal &optional num)
   "Insert a single goal into the buffer."
   (eglot--dbind (hyps ty) goal
-    (magit-insert-section (magit-section goal (not (and num (eql num 1))))
-      (magit-insert-heading
-        (concat
-         (if num (propertize (format "%d: " num) 'font-lock-face 'bold) "")
-         (propertize ty 'font-lock-face 'rocq-goal-face)))
+    (let ((ty (propertize ty 'font-lock-face 'rocq-goal-face)))
+      (when rocq-top-goal
+        (insert ty)
+        (newline)
+        (rocq--insert-separator))
       (mapc (eglot--lambda (names def ty)
               (mapc
                (lambda (name)
@@ -211,20 +293,21 @@ customizable variable `rocq-mode-too-slow'."
                   (insert ":= " def "\n"))
                 (insert ": " ty "\n")
                 (indent-region pt (point) 2)))
-            hyps))
-    (insert "\n")))
+            hyps)
+      (unless rocq-top-goal
+        (rocq--insert-separator)
+        (insert ty)
+        (newline)))))
 
-;;;###autoload
-(defun rocq-goals ()
-  "Update the goal display."
+(defun rocq-request ()
+  "Request current Rocq status."
   (interactive)
   (let ((serv (eglot--current-server-or-lose))
         (state (rocq--goal-request-state))
-        (buf (current-buffer))
-        (goal-bufname (format "*Goals %s*" (buffer-name))))
+        (buf (current-buffer)))
     (unless (equal state
-                   rocq--last-goal-request-state)
-      (setq rocq--last-goal-request-state state)
+                   rocq--last-request-state)
+      (setq rocq--last-request-state state)
       (jsonrpc-async-request
        serv
        :proof/goals
@@ -234,58 +317,139 @@ customizable variable `rocq-mode-too-slow'."
        :success-fn
        (eglot--lambda (textDocument range goals messages)
          (with-current-buffer buf
-           (unless rocq--last-goal-overlay
-             (setq rocq--last-goal-overlay (make-overlay 1 1))
-             (overlay-put rocq--last-goal-overlay 'face 'rocq-mode-last-goal-request))
+           (unless rocq--last-request-overlay
+             (setq rocq--last-request-overlay (make-overlay 1 1))
+             (overlay-put rocq--last-request-overlay 'face 'rocq-mode-last-request))
            (if range
                (when (equal (eglot--VersionedTextDocumentIdentifier) textDocument)
                  (eglot--dbind (start end) range
-                   (move-overlay rocq--last-goal-overlay
+                   (move-overlay rocq--last-request-overlay
                                  (eglot--lsp-position-to-point start)
                                  (eglot--lsp-position-to-point end))))
-             (delete-overlay rocq--last-goal-overlay)))
-         (with-current-buffer (get-buffer-create goal-bufname)
+             (delete-overlay rocq--last-request-overlay)))
+         (with-current-buffer (rocq--status-buffer buf)
            (when (eq major-mode 'fundamental-mode)
-             (rocq-goals-mode))
-           (let ((inhibit-read-only t))
-             (erase-buffer)
-             (magit-insert-section (magit-section)
-               (eglot--dbind (goals stack shelf) goals
-                 (magit-insert-section (magit-section)
-                   (magit-insert-heading
-                     (let ((l (length goals)))
-                       (format "Focused goals (%d/%d)\n"
-                               l
-                               (apply #'+
-                                      l
-                                      (seq-map
-                                       (lambda (x)
-                                         (+ (length (elt x 0)) (length (elt x 1))))
-                                       stack)))))
-                   (cl-loop for i from 0 to (- (length goals) 1)
-                            do (rocq--insert-goal (aref goals i) (+ i 1))))
-                 (newline)
-                 (magit-insert-section (magit-section shelf t)
-                   (magit-insert-heading
-                     (format "Shelf (%d)\n" (length shelf)))
-                   (cl-loop for i from 0 to (- (length shelf) 1)
-                            do (rocq--insert-goal (aref shelf i)))))
-               (newline)
-               (magit-insert-section (magit-section)
-                 (magit-insert-heading
-                   (format "Messages (%d)\n" (length messages)))
-                 (mapc (eglot--lambda (text)
-                         (insert text "\n"))
-                       messages))))
-           (display-buffer
-            (current-buffer)
-            `(display-buffer-reuse-mode-window . ((inhibit-same-window . ,t))))))))))
+             (rocq-status-mode))
+           (setq rocq--goals goals)
+           (setq rocq--messages messages)
+           (setq rocq--selected-goal
+                 (eglot--dbind (goals stack shelf) goals
+                   (if (eql (length goals) 0)
+                       nil
+                     `(goal . 0))))
+           (rocq-refresh-status)))))))
+
+(defun rocq--get-goal (spec)
+  "Get goal corresponding to SPEC."
+  (eglot--dbind (goals stack shelf) rocq--goals
+    (pcase spec
+      (`(goal . ,i) (aref goals i))
+      (`(stack . (,height ,position . ,num))
+       (let* ((slice (aref stack height))
+              (slice (elt slice position)))
+         (aref slice num)))
+      (`(shelf . ,i) (aref shelf i))
+      (_ nil))))
+
+(defun rocq-select-goal ()
+  "Select goal under point."
+  (interactive)
+  (if-let (goal (get-text-property (point) 'rocq--goal))
+      (progn
+        (setq rocq--selected-goal goal)
+        (rocq-refresh-status))
+    (message "No goal under point.")))
+
+(defun rocq--insert-goal-line (spec with-stack)
+  "Insert a line for goal given by SPEC at point, optionally indenting if WITH-STACK is t."
+  (let* ((stack-len (eglot--dbind (stack) rocq--goals (length stack)))
+         (indent
+          (if with-stack
+              (pcase spec
+                (`(goal . ,_) stack-len)
+                (`(stack . (,height ,_ . ,_)) (- stack-len height 1))
+                (`(shelf . ,_) 0)
+                (_ nil))
+            0)))
+    (eglot--dbind (info ty) (rocq--get-goal spec)
+      (let ((p (point))
+            (name (when-let ((name-array (plist-get info :name)))
+                    (elt name-array 1)))
+            (num (pcase spec (`(goal . ,i) i) (_ nil))))
+        (when (or name num)
+          (when num (insert (format "%d" num)))
+          (when name (insert "(?" name ")"))
+          (insert ": "))
+        (insert (propertize "G"
+                            'display
+                            `(left-fringe ,(if (equal spec rocq--selected-goal)
+                                               'filled-square
+                                             'hollow-square))))
+        (insert ty)
+        (indent-rigidly p (point) indent)
+        (insert ?\n)
+        (add-text-properties
+         p (point)
+         `(rocq--goal ,spec))))))
+
+(defun rocq-refresh-status ()
+  ""
+  (interactive)
+  (when-let ((inhibit-read-only t))
+    (let ((p (point))
+          (tot-goals 0))
+      (erase-buffer)
+      (eglot--dbind (goals stack shelf) rocq--goals
+        (cl-loop for i from (- (length stack) 1) downto 0
+                 do (cl-loop for j below (length (elt (aref stack i) 0))
+                             do (setq tot-goals (+ tot-goals 1))
+                             if rocq-show-stack
+                             do (rocq--insert-goal-line `(stack . (,i 0 . ,j)) t))
+                 for pt = (point)
+                 do (cl-loop for j below (length (elt (aref stack i) 1))
+                             do (setq tot-goals (+ tot-goals 1))
+                             if rocq-show-stack
+                             do (rocq--insert-goal-line `(stack . (,i 1 . ,j)) t))
+                 do (goto-char pt))
+        (cl-loop for i below (length goals)
+                 do (setq tot-goals (+ tot-goals 1))
+                 do (rocq--insert-goal-line `(goal . ,i) rocq-show-stack))
+        (goto-char (point-max))
+        (newline)
+        (when rocq-show-shelf
+          (insert "Shelf")
+          (newline)
+          (cl-loop for i below (length shelf)
+                   do (rocq--insert-goal-line `(shelf . ,i) nil))
+          (newline))
+        (insert (format "%d/%d Goals  %d Shelf  %d Messages\n"
+                        (length goals)
+                        tot-goals
+                        (length shelf)
+                        (length rocq--messages))))
+      (let ((goal (rocq--get-goal rocq--selected-goal))
+            (messages rocq--messages))
+        (with-current-buffer (get-buffer-create "*Rocq Goal*")
+          (when (eq major-mode 'fundamental-mode)
+            (rocq-goal-mode))
+          (erase-buffer)
+          (if goal
+              (rocq--insert-goal goal)
+            (mapc (eglot--lambda (text)
+                    (insert text "\n"))
+                  messages))
+          (display-buffer (current-buffer))))
+      (goto-char p)
+      (when-let ((window (get-buffer-window)))
+        (let ((fit-window-to-buffer-horizontally nil)
+              (window-resize-pixelwise t))
+          (fit-window-to-buffer window nil 0))))))
 
 (defvar rocq--idle-goals-timer
   nil)
 
 (defcustom rocq-mode-idle-goals-delay
-  0.5
+  0.3
   "Delay used for automatic goal refreshing."
   :type '(number))
 
@@ -298,7 +462,7 @@ customizable variable `rocq-mode-too-slow'."
         (lambda ()
           (setq rocq--idle-goals-timer nil)
           (when (eq major-mode 'rocq-mode)
-            (rocq-goals)))))))
+            (rocq-request)))))))
 
 
 ;; Processing overlay
@@ -473,8 +637,8 @@ considered slow."
 
 (defvar-keymap rocq-mode-map
   :doc "Keymap for Rocq interaction."
-  "C-c C-," #'rocq-goals
-  "C-c C-M-," #'rocq-go-to-last-goal-request
+  "C-c C-," #'rocq-switch-to-status
+  "C-c C-M-," #'rocq-go-to-last-request
   "C-c C-s" #'rocq-save-vo
   "C-c C-r" #'rocq-reload-vos)
 
