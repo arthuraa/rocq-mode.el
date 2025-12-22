@@ -375,7 +375,7 @@ customizable variable `rocq-mode-too-slow'."
       (let ((p (point))
             (name (when-let ((name-array (plist-get info :name)))
                     (elt name-array 1)))
-            (num (pcase spec (`(goal . ,i) i) (_ nil))))
+            (num (pcase spec (`(goal . ,i) (+ i 1)) (_ nil))))
         (when (or name num)
           (when num (insert (format "%d" num)))
           (when name (insert "(?" name ")"))
