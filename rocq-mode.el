@@ -317,27 +317,28 @@ customizable variable `rocq-mode-too-slow'."
        :success-fn
        (eglot--lambda (textDocument range goals messages)
          (with-current-buffer buf
-           (unless rocq--last-request-overlay
-             (setq rocq--last-request-overlay (make-overlay 1 1))
-             (overlay-put rocq--last-request-overlay 'face 'rocq-mode-last-request))
-           (if range
-               (when (equal (eglot--VersionedTextDocumentIdentifier) textDocument)
-                 (eglot--dbind (start end) range
-                   (move-overlay rocq--last-request-overlay
-                                 (eglot--lsp-position-to-point start)
-                                 (eglot--lsp-position-to-point end))))
-             (delete-overlay rocq--last-request-overlay)))
-         (with-current-buffer (rocq--status-buffer buf)
-           (when (eq major-mode 'fundamental-mode)
-             (rocq-status-mode))
-           (setq rocq--goals goals)
-           (setq rocq--messages messages)
-           (setq rocq--selected-goal
-                 (eglot--dbind (goals stack shelf) goals
-                   (if (eql (length goals) 0)
-                       nil
-                     `(goal . 0))))
-           (rocq-refresh-status)))))))
+           (when (equal state rocq--last-request-state)
+             (unless rocq--last-request-overlay
+               (setq rocq--last-request-overlay (make-overlay 1 1))
+               (overlay-put rocq--last-request-overlay 'face 'rocq-mode-last-request))
+             (if range
+                 (when (equal (eglot--VersionedTextDocumentIdentifier) textDocument)
+                   (eglot--dbind (start end) range
+                     (move-overlay rocq--last-request-overlay
+                                   (eglot--lsp-position-to-point start)
+                                   (eglot--lsp-position-to-point end))))
+               (delete-overlay rocq--last-request-overlay))
+             (with-current-buffer (rocq--status-buffer buf)
+               (when (eq major-mode 'fundamental-mode)
+                 (rocq-status-mode))
+               (setq rocq--goals goals)
+               (setq rocq--messages messages)
+               (setq rocq--selected-goal
+                     (eglot--dbind (goals stack shelf) goals
+                       (if (eql (length goals) 0)
+                           nil
+                         `(goal . 0))))
+               (rocq-refresh-status)))))))))
 
 (defun rocq--get-goal (spec)
   "Get goal corresponding to SPEC."
