@@ -236,10 +236,7 @@ customizable variable `rocq-mode-too-slow'."
         (display-buffer
          (rocq--status-buffer (current-buffer))
          action-alist)))
-    (select-window window)
-    (let ((fit-window-to-buffer-horizontally nil)
-              (window-resize-pixelwise t))
-          (fit-window-to-buffer window nil 0))))
+    (select-window window)))
 
 (defvar-local rocq--last-request-state nil)
 (defvar-local rocq--last-request-overlay nil)
@@ -440,11 +437,7 @@ customizable variable `rocq-mode-too-slow'."
                     (insert text "\n"))
                   messages))
           (display-buffer (current-buffer))))
-      (goto-char p)
-      (when-let ((window (get-buffer-window)))
-        (let ((fit-window-to-buffer-horizontally nil)
-              (window-resize-pixelwise t))
-          (fit-window-to-buffer window nil 0))))))
+      (goto-char p))))
 
 (defvar rocq--idle-goals-timer
   nil)
