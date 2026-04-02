@@ -445,8 +445,11 @@ customizable variable `rocq-mode-too-slow'."
   nil)
 
 (defcustom rocq-mode-idle-goals-delay
-  0.3
-  "Delay used for automatic goal refreshing."
+  (default-value 'eglot-send-changes-idle-time)
+  "Delay used for automatic goal refreshing.
+
+Do not bring this below `eglot-send-changes-idle-time', as otherwise the server will not
+be aware of the changes required to serve the request."
   :type '(number))
 
 (defun rocq--setup-goals-timer ()
