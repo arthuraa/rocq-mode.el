@@ -371,10 +371,14 @@ customizable variable `rocq-mode-too-slow'."
             0)))
     (eglot--dbind (info ty) (rocq--get-goal spec)
       (let ((p (point))
-            (name (when-let* ((name-array (plist-get info :name))
-                              (name-array
-                               (or (plist-get name-array :basename) name-array)))
-                    (elt name-array 1)))
+            (name (when-let ((name-array (plist-get info :name)))
+                    (or
+                     (when-let* ((dirpath (plist-get name-array :dirpath))
+                                 (name-array (plist-get name-array :basename)))
+                       (mapconcat (lambda (x) (elt x 1))
+                                  (nreverse (vconcat (vector name-array) (elt dirpath 1)))
+                                  "."))
+                     (elt name-array 1))))
             (num (pcase spec (`(goal . ,i) (+ i 1)) (_ nil))))
         (when (or name num)
           (when num (insert (format "%d" num)))
