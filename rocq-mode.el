@@ -219,7 +219,7 @@ customizable variable `rocq-mode-too-slow'."
 (defun rocq--status-buffer (buf)
   ""
   (unless (with-current-buffer buf
-            (derived-mode-p '(rocq-mode)))
+            (derived-mode-p 'rocq-mode))
     (error "Buffer is not a Rocq buffer."))
   (get-buffer-create
    (format "*Rocq Status %s*" (buffer-name buf))))
