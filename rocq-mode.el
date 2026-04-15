@@ -640,8 +640,9 @@ considered slow."
 
 (defvar-keymap rocq-mode-map
   :doc "Keymap for Rocq interaction."
-  "C-c C-," #'rocq-switch-to-status
+  "C-c C-," #'rocq-request
   "C-c C-M-," #'rocq-go-to-last-request
+  "C-c C-c" #'rocq-switch-to-status
   "C-c C-s" #'rocq-save-vo
   "C-c C-r" #'rocq-reload-vos)
 
