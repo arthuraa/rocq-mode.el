@@ -5,16 +5,21 @@ the hood, licensed under the GPLv3 or later.
 
 Only the latest =coq-lsp= version (2.5.0) is supported.
 
-This package depends on [[https://github.com/joaotavora/eglot][Eglot]] for its LSP support, and [[https://github.com/magit/magit/blob/main/lisp/magit-section.el][magit-section]] for the
-structured goal display.
+This package depends on [[https://github.com/joaotavora/eglot][Eglot]] for its LSP support.
 
 * Features
-- Structured goal display using magit-section;
+- Structured goal display;
 - Processing overlay indicator;
 - Displaying of slow commands;
 - Automatic addition of other folders containing a ~_CoqProject~ file to the workspace;
 - Instant switching between on-demand and continuous mode;
 - Misc. =coq-lsp= commands like ~rocq-trim~, ~rocq-save-vo~ and ~rocq-reload-vos~.
+
+* Using =rocq-mode=
+Whenever =rocq-mode= requests the current proof status, it updates both a status buffer, which lists all open goals, and a goal display buffer, which shows a selected goal's full context.
+The status buffer shows goal numbers (and their names if they have any), and any goal can be selected for display with =RET=.
+One can toggle unfocused goal display (ie. outside of the current bullet or braces) with ~s f~, and shelf display with =s s=.
+Messages can be displayed using =m=.
 
 * Configuration
 The recommended configuration is via ~use-package~ (see [[https://www.gnu.org/software/emacs/manual/html_mono/use-package.html][use-package's documentation]]), using the ~:vc~ keyword.
@@ -33,7 +38,7 @@ Here is an example configuration enabling ~rocq-mode~ by default with =.v= files
 
 ~rocq-auto-goals-at-point-mode~ is a minor mode that automatically asks for goal display at point after idling for ~rocq-mode-idle-goals-delay~.
 Feel free to liberally toggle it to make the corresponding goal window keep its current display.
-You can also use ~rocq-goals~ (bound to =C-c C-,= by default) to manually request goal display.
+You can also use ~rocq-request~ (bound to =C-c C-,= by default) to manually request goal display.
 
 If you want to turn off on-demand checking (to go back to continuous mode), use ~rocq-toggle-check-on-request~.
 To highlight slow commands, use ~rocq-toggle-timing-data~, and to toggle whether the goals being requested are shown before or after the sentence under point is executed, use ~rocq-toggle-goal-after-tactic~.
@@ -43,10 +48,11 @@ You can change the default slots of ~rocq--lsp-server~ corresponding to these op
 * Default keymap
 | Keybinding  | Command                        |
 |-------------+--------------------------------|
-| ~C-c C-,~   | ~rocq-goals~                   |
-| ~C-c C-M-,~ | ~rocq-go-to-last-goal-request~ |
-| ~C-c C-s~   | ~rocq-save-vo~                 |
-| ~C-c C-r~   | ~rocq-reload-vos~              |
+| =C-c C-,=   | ~rocq-request~                 |
+| =C-c C-M-,= | ~rocq-go-to-last-goal-request~ |
+| =C-c C-c=   | ~rocq-switch-to-status~        |
+| =C-c C-s=   | ~rocq-save-vo~                 |
+| =C-c C-r=   | ~rocq-reload-vos~              |
 
 * Wishlist
 - ??
