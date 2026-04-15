@@ -31,7 +31,10 @@ Here is an example configuration enabling ~rocq-mode~ by default with =.v= files
     :mode "\\.v\\'"
     :hook
     (rocq-mode . rocq-follow-viewport-mode)
-    (rocq-mode . rocq-auto-goals-at-point-mode))
+    (rocq-mode . rocq-auto-goals-at-point-mode)
+    :custom
+    ;; Whether to show the goal above the context, default is `t`
+    (rocq-top-goal t))
 #+end_src
 
 ~rocq-follow-viewport-mode~ is a minor mode that sends viewport notifications to =coq-lsp=, so that it will process only what is visible.
@@ -39,6 +42,8 @@ Here is an example configuration enabling ~rocq-mode~ by default with =.v= files
 ~rocq-auto-goals-at-point-mode~ is a minor mode that automatically asks for goal display at point after idling for ~rocq-mode-idle-goals-delay~.
 Feel free to liberally toggle it to make the corresponding goal window keep its current display.
 You can also use ~rocq-request~ (bound to =C-c C-,= by default) to manually request goal display.
+
+You can customize ~rocq-top-goal~ to display the goal conclusion above or below the context.
 
 If you want to turn off on-demand checking (to go back to continuous mode), use ~rocq-toggle-check-on-request~.
 To highlight slow commands, use ~rocq-toggle-timing-data~, and to toggle whether the goals being requested are shown before or after the sentence under point is executed, use ~rocq-toggle-goal-after-tactic~.
