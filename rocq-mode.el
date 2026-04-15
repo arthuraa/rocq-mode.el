@@ -1,7 +1,7 @@
 ;;; rocq-mode.el ---- Rocq mode using coq-lsp  -*- lexical-binding: t -*-
 
 ;; Author: Josselin Poiret <dev@jpoiret.xyz>
-;; Version: 0.1
+;; Version: 0.2
 ;; Package-Requires: ((eglot "1.12"))
 ;; Keywords: coq, rocq
 ;; URL: https://codeberg.org/jpoiret/rocq-mode.el
