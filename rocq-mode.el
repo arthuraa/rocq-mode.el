@@ -663,27 +663,31 @@ considered slow."
 (defvar rocq-project-files '("_RocqProject" "_CoqProject")
   "File names marking the root of a Rocq project.")
 
-(defun rocq--locate-project-root ()
-  "Return the closest ancestor directory holding a `rocq-project-files', or nil."
-  (when buffer-file-name
-    (locate-dominating-file
-     buffer-file-name
-     (lambda (dir)
-       (seq-some (lambda (name)
-                   (file-exists-p (expand-file-name name dir)))
-                 rocq-project-files)))))
+(defun rocq-eglot-project-find-function (dir)
+  "Locate the Rocq project root for DIR, for eglot's coq-lsp workspace.
+Added to `project-find-functions' so that eglot starts coq-lsp at the
+directory of the closest `rocq-project-files' marker (e.g. _RocqProject),
+rather than at the enclosing version-control root.  coq-lsp resolves a
+file's logical paths from the workspace it is opened in, so the root must
+be correct before the file's `textDocument/didOpen': adding the directory
+as a workspace folder afterwards is too late.
 
-(defun rocq--add-project-workspace-folder ()
-  "Add the buffer's Rocq project root to the workspace.
-Meant to run from `eglot-managed-mode-hook', once the coq-lsp server is
-connected.  Adding it from the major mode itself does not work, since the
-server is only started (asynchronously) by `eglot-ensure'."
-  (when-let* (eglot--managed-mode
-              (server (eglot-current-server))
-              ((rocq--lsp-server-child-p server))
-              (root (rocq--locate-project-root))
-              ((not (member root (rocq-workspace-folders server)))))
-    (rocq-add-workspace-folder root)))
+This only acts during eglot's project lookup (when `eglot-lsp-context' is
+bound) for `rocq-mode' buffers, leaving normal `project.el' behavior for
+those buffers untouched."
+  (when (and (bound-and-true-p eglot-lsp-context)
+             (derived-mode-p 'rocq-mode))
+    (when-let* ((root (locate-dominating-file
+                       dir
+                       (lambda (d)
+                         (seq-some (lambda (name)
+                                     (file-exists-p (expand-file-name name d)))
+                                   rocq-project-files)))))
+      (cons 'transient (expand-file-name root)))))
+
+;; Prepended (the default for `add-hook'), so it takes precedence over
+;; `project-try-vc' when eglot looks up a Rocq buffer's project.
+(add-hook 'project-find-functions #'rocq-eglot-project-find-function)
 
 ;;;###autoload
 (define-derived-mode rocq-mode prog-mode "Rocq"
@@ -691,7 +695,6 @@ server is only started (asynchronously) by `eglot-ensure'."
 
 Key bindings:
 \\{rocq-mode-map}"
-  (add-hook 'eglot-managed-mode-hook #'rocq--add-project-workspace-folder nil t)
   (eglot-ensure)
   (setq-local comment-start "(*"
               comment-end "*)"
