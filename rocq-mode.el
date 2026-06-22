@@ -49,10 +49,10 @@
 ;; We don't want eglot to use its configuration system because it relies solely on dir
 ;; local variables.  We're a major mode, we can do this ourselves.
 (define-advice eglot--workspace-configuration-plist
-    (:around (oldfun server) rocq-configuration-plist)
+    (:around (oldfun server &optional path) rocq-configuration-plist)
   (if (rocq--lsp-server-child-p server)
       (eglot-initialization-options server)
-    (oldfun server)))
+    (funcall oldfun server path)))
 
 (cl-defmethod eglot-initialization-options ((server rocq--lsp-server))
   (list
@@ -660,16 +660,38 @@ considered slow."
            (,(regexp-opt rocq-terminators 'symbols) . 'rocq-terminators)
            (,(regexp-opt rocq-control 'symbols) . 'rocq-control)))))
 
+(defvar rocq-project-files '("_RocqProject" "_CoqProject")
+  "File names marking the root of a Rocq project.")
+
+(defun rocq--locate-project-root ()
+  "Return the closest ancestor directory holding a `rocq-project-files', or nil."
+  (when buffer-file-name
+    (locate-dominating-file
+     buffer-file-name
+     (lambda (dir)
+       (seq-some (lambda (name)
+                   (file-exists-p (expand-file-name name dir)))
+                 rocq-project-files)))))
+
+(defun rocq--add-project-workspace-folder ()
+  "Add the buffer's Rocq project root to the workspace.
+Meant to run from `eglot-managed-mode-hook', once the coq-lsp server is
+connected.  Adding it from the major mode itself does not work, since the
+server is only started (asynchronously) by `eglot-ensure'."
+  (when-let* (eglot--managed-mode
+              (server (eglot-current-server))
+              ((rocq--lsp-server-child-p server))
+              (root (rocq--locate-project-root))
+              ((not (member root (rocq-workspace-folders server)))))
+    (rocq-add-workspace-folder root)))
+
 ;;;###autoload
 (define-derived-mode rocq-mode prog-mode "Rocq"
   "Major mode for Rocq files, using coq-lsp.
 
 Key bindings:
 \\{rocq-mode-map}"
-  (when-let ((server (eglot-current-server))
-             (rocq-proj-dir (locate-dominating-file (buffer-file-name) "_CoqProject"))
-             ((not (member rocq-proj-dir (rocq-workspace-folders server)))))
-    (rocq-add-workspace-folder rocq-proj-dir))
+  (add-hook 'eglot-managed-mode-hook #'rocq--add-project-workspace-folder nil t)
   (eglot-ensure)
   (setq-local comment-start "(*"
               comment-end "*)"

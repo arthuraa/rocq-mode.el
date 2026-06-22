@@ -11,7 +11,7 @@ This package depends on [[https://github.com/joaotavora/eglot][Eglot]] for its L
 - Structured goal display;
 - Processing overlay indicator;
 - Displaying of slow commands;
-- Automatic addition of other folders containing a ~_CoqProject~ file to the workspace;
+- Automatic addition of other folders containing a ~_RocqProject~ or ~_CoqProject~ file to the workspace;
 - Instant switching between on-demand and continuous mode;
 - Misc. =coq-lsp= commands like ~rocq-trim~, ~rocq-save-vo~ and ~rocq-reload-vos~.
 
