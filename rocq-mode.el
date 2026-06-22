@@ -49,10 +49,10 @@
 ;; We don't want eglot to use its configuration system because it relies solely on dir
 ;; local variables.  We're a major mode, we can do this ourselves.
 (define-advice eglot--workspace-configuration-plist
-    (:around (oldfun server) rocq-configuration-plist)
-  (if (rocq--lsp-server-child-p server)
-      (eglot-initialization-options server)
-    (oldfun server)))
+      (:around (oldfun server &optional path) rocq-configuration-plist)
+    (if (rocq--lsp-server-child-p server)
+        (eglot-initialization-options server)
+      (funcall oldfun server path)))
 
 (cl-defmethod eglot-initialization-options ((server rocq--lsp-server))
   (list
