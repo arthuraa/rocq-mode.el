@@ -14,6 +14,7 @@
 (require 'eglot)
 
 (require 'rocq-syntax)
+(require 'rocq-indent)
 
 (defgroup rocq nil
   "Rocq mode using coq-lsp."
@@ -907,6 +908,11 @@ Outside comments, do nothing."
     (modify-syntax-entry ?\( "()1" st)
     (modify-syntax-entry ?\* ". 23n" st)
     (modify-syntax-entry ?\) ")(4" st)
+    ;; Identifiers may contain primes; everything else is punctuation,
+    ;; so that operators such as `=>' and `:=' form tokens of their own.
+    (modify-syntax-entry ?' "_" st)
+    (dolist (c (string-to-list "\\$%@?!#~^`/<>=:;,|-+"))
+      (modify-syntax-entry c "." st))
     st)
   "Syntax table for `rocq-mode', with nestable `(* *)' comments.")
 
@@ -960,7 +966,11 @@ Key bindings:
               comment-start-skip "(\\*+[ \t]*"
               comment-end-skip "[ \t]*\\*+)"
               comment-style 'multi-line
-              fill-paragraph-function #'rocq-fill-paragraph)
+              fill-paragraph-function #'rocq-fill-paragraph
+              indent-line-function #'rocq-indent-line
+              indent-tabs-mode nil
+              parse-sexp-ignore-comments t
+              electric-indent-chars (append '(?| ?}) electric-indent-chars))
   (rocq--setup-font-lock))
 
 (define-minor-mode rocq-follow-viewport-mode

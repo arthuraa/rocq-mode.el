@@ -13,6 +13,7 @@ This package depends on [[https://github.com/joaotavora/eglot][Eglot]] for its L
 - Displaying of slow commands;
 - Automatic addition of folders containing a ~_RocqProject~ or ~_CoqProject~ file to the workspace;
 - Instant switching between on-demand and continuous mode;
+- Indentation of proofs, bullets, =match= branches and terms;
 - Misc. =coq-lsp= commands like ~rocq-trim~, ~rocq-save-vo~ and ~rocq-reload-vos~.
 
 * Using =rocq-mode=
@@ -28,6 +29,16 @@ Where it is displayed can be customized with ~display-buffer-alist~, for instanc
   (add-to-list 'display-buffer-alist
                '("\\*Rocq Goal\\*" display-buffer-in-side-window (side . right)))
 #+end_src
+
+* Indentation
+=TAB= indents the current line and =M-x indent-region= a region, following the structure of the code: proof bodies, bullets and braces in proofs, =match= branches, =fun= and =let= bodies, and the contents of brackets.
+Sentences are recognized without a parser, so unusual notations may occasionally fool it.
+Four options control the layout:
+- ~rocq-indent-offset~ (default 2) is the indentation of continuation lines, branch bodies and nested bullets;
+- ~rocq-indent-proof-offset~ (default 2) is the indentation of tactics relative to =Proof=; set it to 0 for the style where tactics start in column zero;
+- ~rocq-indent-match-offset~ (default 0) shifts =|= branches relative to their =match=;
+- ~rocq-indent-sections~ (default ~nil~) indents the contents of sections and modules.
+Typing =|= or =}= at the start of a line reindents it.
 
 * Configuration
 The recommended configuration is via ~use-package~ (see [[https://www.gnu.org/software/emacs/manual/html_mono/use-package.html][use-package's documentation]]), using the ~:vc~ keyword.
@@ -81,6 +92,11 @@ Folders can also be added and removed by hand with ~rocq-add-workspace-folder~ a
 | =C-c C-c=   | ~rocq-switch-to-status~        |
 | =C-c C-s=   | ~rocq-save-vo~                 |
 | =C-c C-r=   | ~rocq-reload-vos~              |
+
+* Development
+=make compile= byte-compiles the package with warnings treated as errors, and =make test= runs the ERT suite in =test/=.
+The suite exercises project root registration, server start and shutdown, goal display, indentation and comment filling.
+The server tests run against =test/fake-lsp.py=, a small LSP server standing in for =coq-lsp=, and are skipped when =python3= or =git= is not available.
 
 * Wishlist
 - ??
