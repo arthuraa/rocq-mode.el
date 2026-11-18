@@ -54,7 +54,7 @@ You can also use ~rocq-request~ (bound to =C-c C-,= by default) to manually requ
 You can customize ~rocq-top-goal~ to display the goal conclusion above or below the context.
 
 By default, entering ~rocq-mode~ starts a =coq-lsp= server for the current project if there is none yet.
-Set ~rocq-mode-start-server~ to ~nil~ to start servers yourself with =M-x eglot= instead; files you then open in a project whose server is already running are picked up by it automatically.
+Set ~rocq-mode-start-server~ to ~nil~ to start servers yourself instead: requesting the goals with =C-c C-,= (~rocq-request~) starts the server of the current project if it is not running, as does =M-x eglot=; files you then open in a project whose server is already running are picked up by it automatically.
 A server can be stopped with =M-x eglot-shutdown= (or =M-x eglot-shutdown-all=), and setting Eglot's ~eglot-autoshutdown~ to ~t~ stops a server automatically once the last buffer it manages is killed, which avoids accumulating idle servers.
 
 If you want to turn off on-demand checking (to go back to continuous mode), use ~rocq-toggle-check-on-request~.

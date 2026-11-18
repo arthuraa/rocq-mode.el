@@ -81,6 +81,7 @@
 (defvar rocq-mode--timing-overlays)
 (defvar rocq-mode--processing-overlays)
 (defvar rocq--last-request-overlay)
+(defvar rocq--last-request-state)
 
 (cl-defgeneric (setf rocq-timing-data) (value server)
   ""
@@ -213,10 +214,12 @@ is why it goes on `eglot--managed-mode-hook' rather than on the public
 (defun rocq--on-managed-mode-change ()
   "React to Eglot starting or stopping to manage the current buffer.
 When it stops, after `eglot-shutdown' for instance, remove the overlays
-that reflect server state, as they would otherwise linger."
+that reflect server state, as they would otherwise linger, and forget
+the last request so that the next one is sent to the next server."
   (if (eglot-managed-p)
       (rocq--register-project-root)
-    (rocq--clear-overlays)))
+    (rocq--clear-overlays)
+    (setq rocq--last-request-state nil)))
 
 (defun rocq-remove-workspace-folder (folder)
   "Remove a folder to the workspace."
@@ -428,13 +431,30 @@ Display the status and goal buffers if needed."
         (insert ty)
         (newline)))))
 
+(defun rocq--ensure-server ()
+  "Return the server managing the current buffer, starting one if needed.
+Starting it waits until the server is initialized, for at most
+`eglot-connect-timeout' seconds, so that the buffer is managed by Eglot
+when this returns.  Signal an error if that fails."
+  (unless (eglot-managed-p)
+    ;; A prefix argument would make `eglot' prompt for the server
+    ;; command and drop the `rocq--lsp-server' class, so hide it.
+    (let ((current-prefix-arg nil)
+          (eglot-sync-connect t))
+      (call-interactively #'eglot))
+    (unless (eglot-managed-p)
+      (eglot--error "Could not start a server for %s" (current-buffer))))
+  (eglot--current-server-or-lose))
+
 (defun rocq-request (&optional display)
   "Request current Rocq status.
-Interactively, or if DISPLAY is non-nil, also display the goal buffer
-once the status is known.  Otherwise, the goal buffer is only displayed
-according to `rocq-display-goals'."
+If no coq-lsp server manages the buffer, start one first, which makes
+this the command to turn coq-lsp on when `rocq-mode-start-server' is nil
+or after `eglot-shutdown'.  Interactively, or if DISPLAY is non-nil,
+also display the goal buffer once the status is known.  Otherwise, the
+goal buffer is only displayed according to `rocq-display-goals'."
   (interactive (list t))
-  (let ((serv (eglot--current-server-or-lose))
+  (let ((serv (rocq--ensure-server))
         (state (rocq--goal-request-state))
         (buf (current-buffer)))
     (if (equal state rocq--last-request-state)
@@ -916,8 +936,9 @@ Outside comments, do nothing."
 
 (defcustom rocq-mode-start-server t
   "Whether to start coq-lsp automatically when entering `rocq-mode'.
-When nil, start it on demand with \[eglot].  Either way, a buffer whose
-project already has a running server is managed by it right away."
+When nil, start it on demand with \\[rocq-request] or \\[eglot].  Either
+way, a buffer whose project already has a running server is managed by
+it right away."
   :type 'boolean)
 
 ;;;###autoload
