@@ -10,6 +10,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'eglot)
 
 (require 'rocq-syntax)
@@ -50,9 +51,9 @@
 ;; local variables.  We're a major mode, we can do this ourselves.
 (define-advice eglot--workspace-configuration-plist
     (:around (oldfun server) rocq-configuration-plist)
-  (if (rocq--lsp-server-child-p server)
+  (if (cl-typep server 'rocq--lsp-server)
       (eglot-initialization-options server)
-    (oldfun server)))
+    (funcall oldfun server)))
 
 (cl-defmethod eglot-initialization-options ((server rocq--lsp-server))
   (list
@@ -70,6 +71,8 @@
    (setf (slot-value server 'check-on-request) value)
    (eglot-signal-didChangeConfiguration server)))
 
+(defvar rocq-mode--timing-overlays)
+
 (cl-defgeneric (setf rocq-timing-data) (value server)
   ""
   (:method
@@ -79,8 +82,9 @@
    (unless value
      (mapc
       (lambda (buffer)
-        (mapc #'delete-overlay rocq-mode--timing-overlays)
-        (setq rocq-mode--timing-overlays '()))
+        (with-current-buffer buffer
+          (mapc #'delete-overlay rocq-mode--timing-overlays)
+          (setq rocq-mode--timing-overlays '())))
       (eglot--managed-buffers server)))))
 
 (cl-defgeneric (setf rocq-goal-after-tactic) (value server)
@@ -114,11 +118,10 @@
 
 (cl-defmethod eglot-workspace-folders
   ((server rocq--lsp-server))
-  (let ((project (eglot--project server)))
-    (seq-into
-     (mapcar #'rocq--workspace-folder-repr
-             (rocq-workspace-folders server))
-     'vector)))
+  (seq-into
+   (mapcar #'rocq--workspace-folder-repr
+           (rocq-workspace-folders server))
+   'vector))
 
 (defun rocq-add-workspace-folder (folder)
   "Add a folder to the workspace."
@@ -137,7 +140,9 @@
        "Select folder to remove: "
        (rocq-workspace-folders server)
        nil t))))
-  (setf (rocq-workspace-folders server) (delete folder (rocq-workspace-folders server) :test #'equal)))
+  (let ((server (eglot--current-server-or-lose)))
+    (setf (rocq-workspace-folders server)
+          (remove folder (rocq-workspace-folders server)))))
 
 (defun rocq-toggle-check-on-request ()
   "Toggle checking on request."
@@ -162,6 +167,18 @@ customizable variable `rocq-mode-too-slow'."
 
 
 ;; Goal display
+
+(defgroup rocq nil
+  "Rocq mode using coq-lsp."
+  :group 'languages
+  :prefix "rocq-")
+
+(defvar-local rocq--last-request-state nil)
+(defvar-local rocq--last-request-overlay nil)
+
+(defvar-local rocq--goals nil)
+(defvar-local rocq--messages nil)
+(defvar-local rocq--selected-goal nil)
 
 (defcustom rocq-top-goal
   t
@@ -225,7 +242,8 @@ customizable variable `rocq-mode-too-slow'."
    (format "*Rocq Status %s*" (buffer-name buf))))
 
 (defun rocq-switch-to-status ()
-  "Switch to the status buffer for the current Rocq buffer, displaying it if needed."
+  "Switch to the status buffer for the current Rocq buffer.
+Display the buffer if needed."
   (interactive)
   (when-let
       ((action-alist
@@ -237,13 +255,6 @@ customizable variable `rocq-mode-too-slow'."
          (rocq--status-buffer (current-buffer))
          action-alist)))
     (select-window window)))
-
-(defvar-local rocq--last-request-state nil)
-(defvar-local rocq--last-request-overlay nil)
-
-(defvar-local rocq--goals nil)
-(defvar-local rocq--messages nil)
-(defvar-local rocq--selected-goal nil)
 
 (defun rocq--goal-request-state ()
   "Builds a goal request state."
@@ -272,7 +283,7 @@ customizable variable `rocq-mode-too-slow'."
    (make-string 6 ?─))
   (newline))
 
-(defun rocq--insert-goal (goal &optional num)
+(defun rocq--insert-goal (goal &optional _num)
   "Insert a single goal into the buffer."
   (eglot--dbind (hyps ty) goal
     (let ((ty (propertize ty 'font-lock-face 'rocq-goal-face)))
@@ -332,6 +343,7 @@ customizable variable `rocq-mode-too-slow'."
                (setq rocq--messages messages)
                (setq rocq--selected-goal
                      (eglot--dbind (goals stack shelf) goals
+                       (ignore stack shelf)
                        (if (eql (length goals) 0)
                            nil
                          `(goal . 0))))
@@ -359,7 +371,9 @@ customizable variable `rocq-mode-too-slow'."
     (message "No goal under point.")))
 
 (defun rocq--insert-goal-line (spec with-stack)
-  "Insert a line for goal given by SPEC at point, optionally indenting if WITH-STACK is t."
+  "Insert a line for goal given by SPEC at point.
+If WITH-STACK is non-nil, indent the line according to its depth in
+the goal stack."
   (let* ((stack-len (eglot--dbind (stack) rocq--goals (length stack)))
          (indent
           (if with-stack
@@ -452,8 +466,9 @@ customizable variable `rocq-mode-too-slow'."
   (default-value 'eglot-send-changes-idle-time)
   "Delay used for automatic goal refreshing.
 
-Do not bring this below `eglot-send-changes-idle-time', as otherwise the server will not
-be aware of the changes required to serve the request."
+Do not bring this below `eglot-send-changes-idle-time', as otherwise
+the server will not be aware of the changes required to serve the
+request."
   :type '(number))
 
 (defun rocq--setup-goals-timer ()
@@ -526,8 +541,7 @@ be aware of the changes required to serve the request."
 
 (defcustom rocq-mode-too-slow
   0.3
-  "Time (in seconds) such that any command that takes longer to execute is
-considered slow."
+  "Time in seconds above which a command is considered slow."
   :type '(number))
 
 (defface rocq-mode-slow-face
@@ -536,7 +550,9 @@ considered slow."
   "Face used for slow commands.")
 
 (cl-defmethod eglot-handle-notification
-  ((server rocq--lsp-server) (_method (eql $/coq/filePerfData)) &key textDocument summary timings)
+  ((_server rocq--lsp-server) (_method (eql $/coq/filePerfData))
+   &key textDocument summary timings)
+  (ignore summary)
   (eglot--dbind (uri) textDocument
     (if-let* ((path (expand-file-name (eglot--uri-to-path uri)))
               (buffer (find-buffer-visiting path)))
@@ -546,6 +562,7 @@ considered slow."
             (setq rocq-mode--timing-overlays '())
             (mapc (eglot--lambda (range info)
                     (eglot--dbind (time memory cache_hit time_hash) info
+                      (ignore memory cache_hit time_hash)
                       (when (>= time rocq-mode-too-slow)
                         (eglot--dbind (start end) range
                           (let ((overlay
