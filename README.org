@@ -17,32 +17,46 @@ This package depends on [[https://github.com/joaotavora/eglot][Eglot]] for its L
 - Misc. =coq-lsp= commands like ~rocq-trim~, ~rocq-save-vo~ and ~rocq-reload-vos~.
 
 * Using =rocq-mode=
-Whenever =rocq-mode= requests the current proof status, it updates both a status buffer, which lists all open goals, and a goal display buffer, which shows a selected goal's full context.
-The status buffer shows goal numbers (and their names if they have any), and any goal can be selected for display with =RET=.
-One can toggle unfocused goal display (ie. outside of the current bullet or braces) with ~s f~, and shelf display with =s s=.
-Messages can be displayed using =m=.
+Whenever =rocq-mode= requests the current proof status, it updates both a status
+buffer, which lists all open goals, and a goal display buffer, which shows a
+selected goal's full context.  The status buffer shows goal numbers (and their
+names if they have any), and any goal can be selected for display with =RET=.
+One can toggle unfocused goal display (ie. outside of the current bullet or
+braces) with ~s f~, and shelf display with =s s=.  Messages can be displayed
+using =m=.
 
-The goal buffer is only displayed by commands you invoke explicitly, such as ~rocq-request~, ~rocq-switch-to-status~ or selecting a goal; automatic refreshes update it in place if it is visible and leave your windows alone otherwise.
-Set ~rocq-display-goals~ to ~always~ to have every refresh display it.
-Where it is displayed can be customized with ~display-buffer-alist~, for instance to keep it in a side window:
+The goal buffer is only displayed by commands you invoke explicitly, such as
+~rocq-request~, ~rocq-switch-to-status~ or selecting a goal; automatic refreshes
+update it in place if it is visible and leave your windows alone otherwise.  Set
+~rocq-display-goals~ to ~always~ to have every refresh display it.  Where it is
+displayed can be customized with ~display-buffer-alist~, for instance to keep it
+in a side window:
 #+begin_src emacs-lisp
   (add-to-list 'display-buffer-alist
                '("\\*Rocq Goal\\*" display-buffer-in-side-window (side . right)))
 #+end_src
 
 * Indentation
-=TAB= indents the current line and =M-x indent-region= a region, following the structure of the code: proof bodies, bullets and braces in proofs, =match= branches, =fun= and =let= bodies, and the contents of brackets.
-Sentences are recognized without a parser, so unusual notations may occasionally fool it.
+=TAB= indents the current line and =M-x indent-region= a region, following the
+structure of the code: proof bodies, bullets and braces in proofs, =match=
+branches, =fun= and =let= bodies, and the contents of brackets.  Sentences are
+recognized without a parser, so unusual notations may occasionally fool it.
 Four options control the layout:
-- ~rocq-indent-offset~ (default 2) is the indentation of continuation lines, branch bodies and nested bullets;
-- ~rocq-indent-proof-offset~ (default 2) is the indentation of tactics relative to =Proof=; set it to 0 for the style where tactics start in column zero;
-- ~rocq-indent-match-offset~ (default 0) shifts =|= branches relative to their =match=;
-- ~rocq-indent-sections~ (default ~nil~) indents the contents of sections and modules.
+- ~rocq-indent-offset~ (default 2) is the indentation of continuation lines,
+  branch bodies and nested bullets;
+- ~rocq-indent-proof-offset~ (default 2) is the indentation of tactics relative
+  to =Proof=; set it to 0 for the style where tactics start in column zero;
+- ~rocq-indent-match-offset~ (default 0) shifts =|= branches relative to their
+  =match=;
+- ~rocq-indent-sections~ (default ~nil~) indents the contents of sections and
+  modules.
 Typing =|= or =}= at the start of a line reindents it.
 
 * Configuration
-The recommended configuration is via ~use-package~ (see [[https://www.gnu.org/software/emacs/manual/html_mono/use-package.html][use-package's documentation]]), using the ~:vc~ keyword.
-Here is an example configuration enabling ~rocq-mode~ by default with =.v= files, as well as enabling viewport following and automatic goal request.
+The recommended configuration is via ~use-package~ (see [[https://www.gnu.org/software/emacs/manual/html_mono/use-package.html][use-package's
+documentation]]), using the ~:vc~ keyword.  Here is an example configuration
+enabling ~rocq-mode~ by default with =.v= files, as well as enabling viewport
+following and automatic goal request.
 #+begin_src emacs-lisp
   (use-package rocq-mode
     :vc (:url "https://codeberg.org/jpoiret/rocq-mode.el.git"
@@ -56,33 +70,54 @@ Here is an example configuration enabling ~rocq-mode~ by default with =.v= files
     (rocq-top-goal t))
 #+end_src
 
-~rocq-follow-viewport-mode~ is a minor mode that sends viewport notifications to =coq-lsp=, so that it will process only what is visible.
+~rocq-follow-viewport-mode~ is a minor mode that sends viewport notifications to
+=coq-lsp=, so that it will process only what is visible.
 
-~rocq-auto-goals-at-point-mode~ is a minor mode that automatically asks for goal display at point after idling for ~rocq-mode-idle-goals-delay~.
-Feel free to liberally toggle it to make the corresponding goal window keep its current display.
-You can also use ~rocq-request~ (bound to =C-c C-,= by default) to manually request goal display.
+~rocq-auto-goals-at-point-mode~ is a minor mode that automatically asks for goal
+display at point after idling for ~rocq-mode-idle-goals-delay~.  Feel free to
+liberally toggle it to make the corresponding goal window keep its current
+display.  You can also use ~rocq-request~ (bound to =C-c C-,= by default) to
+manually request goal display.
 
-You can customize ~rocq-top-goal~ to display the goal conclusion above or below the context.
+You can customize ~rocq-top-goal~ to display the goal conclusion above or below
+the context.
 
-By default, entering ~rocq-mode~ starts a =coq-lsp= server for the current project if there is none yet.
-Set ~rocq-mode-start-server~ to ~nil~ to start servers yourself instead: requesting the goals with =C-c C-,= (~rocq-request~) starts the server of the current project if it is not running, as does =M-x eglot=; files you then open in a project whose server is already running are picked up by it automatically.
-A server can be stopped with =M-x eglot-shutdown= (or =M-x eglot-shutdown-all=), and setting Eglot's ~eglot-autoshutdown~ to ~t~ stops a server automatically once the last buffer it manages is killed, which avoids accumulating idle servers.
+By default, entering ~rocq-mode~ starts a =coq-lsp= server for the current
+project if there is none yet.  Set ~rocq-mode-start-server~ to ~nil~ to start
+servers yourself instead: requesting the goals with =C-c C-,= (~rocq-request~)
+starts the server of the current project if it is not running, as does =M-x
+eglot=; files you then open in a project whose server is already running are
+picked up by it automatically.  A server can be stopped with =M-x
+eglot-shutdown= (or =M-x eglot-shutdown-all=), and setting Eglot's
+~eglot-autoshutdown~ to ~t~ stops a server automatically once the last buffer it
+manages is killed, which avoids accumulating idle servers.
 
-If you want to turn off on-demand checking (to go back to continuous mode), use ~rocq-toggle-check-on-request~.
-To highlight slow commands, use ~rocq-toggle-timing-data~, and to toggle whether the goals being requested are shown before or after the sentence under point is executed, use ~rocq-toggle-goal-after-tactic~.
-Note that these changes are global to the =coq-lsp= session.
-You can change the default slots of ~rocq--lsp-server~ corresponding to these options using ~oset-default~, but note there is no analogue of ~setq-local~ for this, so these changes are global and not retroactive on started =coq-lsp= sessions.
+If you want to turn off on-demand checking (to go back to continuous mode), use
+~rocq-toggle-check-on-request~.  To highlight slow commands, use
+~rocq-toggle-timing-data~, and to toggle whether the goals being requested are
+shown before or after the sentence under point is executed, use
+~rocq-toggle-goal-after-tactic~.  Note that these changes are global to the
+=coq-lsp= session.  You can change the default slots of ~rocq--lsp-server~
+corresponding to these options using ~oset-default~, but note there is no
+analogue of ~setq-local~ for this, so these changes are global and not
+retroactive on started =coq-lsp= sessions.
 
 * Projects
 =coq-lsp= only looks for project files at the root of its workspace folders.
-Besides the folder of the current project (as determined by =project.el=), =rocq-mode= registers, for every Rocq file you open, the nearest directory above it containing one of the files in ~rocq-project-files~ (by default ~_RocqProject~ or ~_CoqProject~), so that nested projects get their own flags.
+Besides the folder of the current project (as determined by =project.el=),
+=rocq-mode= registers, for every Rocq file you open, the nearest directory above
+it containing one of the files in ~rocq-project-files~ (by default
+~_RocqProject~ or ~_CoqProject~), so that nested projects get their own flags.
 
-If your layout is different, you can set ~rocq-project-root-function~ to a function returning the project root of the current buffer, or set ~rocq-project-root~ for a specific project with a =.dir-locals.el= file:
+If your layout is different, you can set ~rocq-project-root-function~ to a
+function returning the project root of the current buffer, or set
+~rocq-project-root~ for a specific project with a =.dir-locals.el= file:
 #+begin_src emacs-lisp
   ((rocq-mode . ((rocq-project-root . "../theories/"))))
 #+end_src
 
-Folders can also be added and removed by hand with ~rocq-add-workspace-folder~ and ~rocq-remove-workspace-folder~.
+Folders can also be added and removed by hand with ~rocq-add-workspace-folder~
+and ~rocq-remove-workspace-folder~.
 
 * Default keymap
 | Keybinding  | Command                        |
@@ -94,9 +129,12 @@ Folders can also be added and removed by hand with ~rocq-add-workspace-folder~ a
 | =C-c C-r=   | ~rocq-reload-vos~              |
 
 * Development
-=make compile= byte-compiles the package with warnings treated as errors, and =make test= runs the ERT suite in =test/=.
-The suite exercises project root registration, server start and shutdown, goal display, indentation and comment filling.
-The server tests run against =test/fake-lsp.py=, a small LSP server standing in for =coq-lsp=, and are skipped when =python3= or =git= is not available.
+=make compile= byte-compiles the package with warnings treated as errors, and
+=make test= runs the ERT suite in =test/=.  The suite exercises project root
+registration, server start and shutdown, goal display, indentation and comment
+filling.  The server tests run against =test/fake-lsp.py=, a small LSP server
+standing in for =coq-lsp=, and are skipped when =python3= or =git= is not
+available.
 
 * Wishlist
 - ??
