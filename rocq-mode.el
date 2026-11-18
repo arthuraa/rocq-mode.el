@@ -15,6 +15,11 @@
 
 (require 'rocq-syntax)
 
+(defgroup rocq nil
+  "Rocq mode using coq-lsp."
+  :group 'languages
+  :prefix "rocq-")
+
 
 ;; LSP implementation
 
@@ -29,7 +34,8 @@
     :reader rocq-timing-data
     :initform nil)
    (pending-file-progress
-    :documentation "Alist mapping LSP URIs to the last pending file progress notification."
+    :documentation
+    "Alist mapping LSP URIs to the last pending file progress notification."
     :accessor rocq--pending-file-progress
     :initform '())
    (pending-file-progress-timer
@@ -47,8 +53,9 @@
 
 
 ;; XXX: This should really be a generic in eglot.
-;; We don't want eglot to use its configuration system because it relies solely on dir
-;; local variables.  We're a major mode, we can do this ourselves.
+;; We don't want eglot to use its configuration system because it relies
+;; solely on dir local variables.  We're a major mode, we can do this
+;; ourselves.
 (define-advice eglot--workspace-configuration-plist
     (:around (oldfun server) rocq-configuration-plist)
   (if (cl-typep server 'rocq--lsp-server)
@@ -109,10 +116,12 @@
        :event
        (list
         :added (seq-into
-                (mapcar #'rocq--workspace-folder-repr (cl-set-difference value prev-val :test #'equal))
+                (mapcar #'rocq--workspace-folder-repr
+                        (cl-set-difference value prev-val :test #'equal))
                 'vector)
         :removed (seq-into
-                  (mapcar #'rocq--workspace-folder-repr (cl-set-difference prev-val value :test #'equal))
+                  (mapcar #'rocq--workspace-folder-repr
+                          (cl-set-difference prev-val value :test #'equal))
                   'vector)))))
    (setf (slot-value server 'workspace-folders) value)))
 
@@ -137,10 +146,43 @@
         (message "%s is already in the Rocq workspace folders." folder)
       (push folder (rocq-workspace-folders server)))))
 
+(defcustom rocq-project-files '("_RocqProject" "_CoqProject")
+  "File names marking the root of a Rocq project.
+The nearest directory above a Rocq file containing one of these files
+is registered as a workspace folder, so that coq-lsp reads the project
+file there.  See `rocq-project-root-function'."
+  :type '(repeat string))
+
+(defcustom rocq-project-root-function #'rocq-default-project-root
+  "Function returning the root of the Rocq project of the current buffer.
+It is called with no arguments in a buffer visiting a Rocq file, and
+should return a directory name, or nil if the file belongs to no
+project.  It is not consulted when `rocq-project-root' is set."
+  :type 'function)
+
+(defvar-local rocq-project-root nil
+  "Root of the Rocq project of the current buffer, or nil to detect it.
+Relative names are expanded against the buffer's `default-directory'.
+Intended to be set from `.dir-locals.el' for projects whose layout
+`rocq-project-root-function' does not detect.")
+;;;###autoload
+(put 'rocq-project-root 'safe-local-variable #'stringp)
+
+(defun rocq-default-project-root ()
+  "Return the nearest directory above the current file with a project file.
+Project files are the ones listed in `rocq-project-files'."
+  (and buffer-file-name
+       (locate-dominating-file
+        buffer-file-name
+        (lambda (dir)
+          (seq-some (lambda (file) (file-exists-p (expand-file-name file dir)))
+                    rocq-project-files)))))
+
 (defun rocq--project-root ()
   "Return the root of the Rocq project of the current buffer, or nil."
-  (and buffer-file-name
-       (locate-dominating-file buffer-file-name "_CoqProject")))
+  (if rocq-project-root
+      (file-name-as-directory (expand-file-name rocq-project-root))
+    (funcall rocq-project-root-function)))
 
 (defun rocq--register-project-root ()
   "Register the Rocq project of the current buffer as a workspace folder.
@@ -189,15 +231,11 @@ customizable variable `rocq-mode-too-slow'."
   "Toggle whether the sentence under point is run when requesting state."
   (interactive)
   (let* ((server (eglot--current-server-or-lose)))
-    (setf (rocq-goal-after-tactic server) (not (rocq-goal-after-tactic server)))))
+    (setf (rocq-goal-after-tactic server)
+          (not (rocq-goal-after-tactic server)))))
 
 
 ;; Goal display
-
-(defgroup rocq nil
-  "Rocq mode using coq-lsp."
-  :group 'languages
-  :prefix "rocq-")
 
 (defvar-local rocq--last-request-state nil)
 (defvar-local rocq--last-request-overlay nil)
@@ -320,7 +358,9 @@ Display the buffer if needed."
       (mapc (eglot--lambda (names def ty)
               (mapc
                (lambda (name)
-                 (insert (propertize name 'font-lock-face 'font-lock-variable-name-face) " "))
+                 (insert (propertize name 'font-lock-face
+                                     'font-lock-variable-name-face)
+                         " "))
                names)
               (let ((pt (point)))
                 (when def
@@ -354,9 +394,11 @@ Display the buffer if needed."
            (when (equal state rocq--last-request-state)
              (unless rocq--last-request-overlay
                (setq rocq--last-request-overlay (make-overlay 1 1))
-               (overlay-put rocq--last-request-overlay 'face 'rocq-mode-last-request))
+               (overlay-put rocq--last-request-overlay
+                            'face 'rocq-mode-last-request))
              (if range
-                 (when (equal (eglot--VersionedTextDocumentIdentifier) textDocument)
+                 (when (equal (eglot--VersionedTextDocumentIdentifier)
+                              textDocument)
                    (eglot--dbind (start end) range
                      (move-overlay rocq--last-request-overlay
                                    (eglot--lsp-position-to-point start)
@@ -416,7 +458,8 @@ the goal stack."
                      (when-let* ((dirpath (plist-get name-array :dirpath))
                                  (name-array (plist-get name-array :basename)))
                        (mapconcat (lambda (x) (elt x 1))
-                                  (nreverse (vconcat (vector name-array) (elt dirpath 1)))
+                                  (nreverse (vconcat (vector name-array)
+                                                     (elt dirpath 1)))
                                   "."))
                      (elt name-array 1))))
             (num (pcase spec (`(goal . ,i) (+ i 1)) (_ nil))))
@@ -448,12 +491,14 @@ the goal stack."
                  do (cl-loop for j below (length (elt (aref stack i) 0))
                              do (setq tot-goals (+ tot-goals 1))
                              if rocq-show-stack
-                             do (rocq--insert-goal-line `(stack . (,i 0 . ,j)) t))
+                             do (rocq--insert-goal-line
+                                 `(stack . (,i 0 . ,j)) t))
                  for pt = (point)
                  do (cl-loop for j below (length (elt (aref stack i) 1))
                              do (setq tot-goals (+ tot-goals 1))
                              if rocq-show-stack
-                             do (rocq--insert-goal-line `(stack . (,i 1 . ,j)) t))
+                             do (rocq--insert-goal-line
+                                 `(stack . (,i 1 . ,j)) t))
                  do (goto-char pt))
         (cl-loop for i below (length goals)
                  do (setq tot-goals (+ tot-goals 1))
@@ -540,7 +585,8 @@ request."
                       (progn
                         (add-to-list 'rocq-mode--processing-overlays
                                      overlay)
-                        (overlay-put overlay 'face 'rocq-mode-processing-face)))))
+                        (overlay-put overlay
+                                     'face 'rocq-mode-processing-face)))))
                 processing)))))
 
 (defun rocq--debounced-file-progress-handling (server)
@@ -550,7 +596,8 @@ request."
   (setf (rocq--pending-file-progress-timer server) nil))
 
 (cl-defmethod eglot-handle-notification
-  ((server rocq--lsp-server) (_method (eql $/coq/fileProgress)) &key textDocument processing)
+  ((server rocq--lsp-server) (_method (eql $/coq/fileProgress))
+   &key textDocument processing)
   (eglot--dbind (uri) textDocument
     (unless (timerp (rocq--pending-file-progress-timer server))
       (run-with-timer rocq-mode-file-progress-debounce-time
@@ -598,7 +645,8 @@ request."
                             (progn
                               (add-to-list 'rocq-mode--timing-overlays
                                            overlay)
-                              (overlay-put overlay 'face 'rocq-mode-slow-face)))))))
+                              (overlay-put overlay
+                                           'face 'rocq-mode-slow-face)))))))
                   timings))))))
 
 
@@ -617,10 +665,10 @@ request."
                           (propertize "Successfully saved .vo file"
                                       'face 'success)))
      :error-fn
-     (lambda (_) (message "%s\n%s"
-                          (propertize "Failed saving .vo file"
-                                      'face 'error)
-                          "Maybe you haven't finished checking the whole file?")))))
+     (lambda (_)
+       (message "%s\n%s"
+                (propertize "Failed saving .vo file" 'face 'error)
+                "Maybe you haven't finished checking the whole file?")))))
 
 (defun rocq-reload-vos ()
   "Ask coq-lsp to reload currently loaded vo files."
@@ -685,7 +733,8 @@ or just after the closer."
       (save-excursion
         (skip-chars-backward " \t")
         (and (>= (- (point) 2) (point-min))
-             (string= "*)" (buffer-substring-no-properties (- (point) 2) (point)))
+             (string= "*)"
+                      (buffer-substring-no-properties (- (point) 2) (point)))
              (nth 8 (syntax-ppss (1- (point))))))))
 
 (defun rocq--comment-bounds ()
@@ -765,7 +814,8 @@ Outside comments, do nothing."
 ;; General mode setup
 
 (defvar rocq-mode-syntax-table
-  (let ((st (make-syntax-table))) ; define-derived-mode will add the proper parent
+  ;; `define-derived-mode' will add the proper parent.
+  (let ((st (make-syntax-table)))
     (modify-syntax-entry ?\( "()1" st)
     (modify-syntax-entry ?\* ". 23n" st)
     (modify-syntax-entry ?\) ")(4" st)
@@ -781,13 +831,15 @@ Outside comments, do nothing."
 
 ;;;###autoload
 (with-eval-after-load 'eglot
-  (add-to-list 'eglot-server-programs (cons 'rocq-mode (list 'rocq--lsp-server "coq-lsp"))))
+  (add-to-list 'eglot-server-programs
+               (cons 'rocq-mode (list 'rocq--lsp-server "coq-lsp"))))
 
 (defun rocq--setup-font-lock ()
     ""
   (setq font-lock-defaults
         `(((,(regexp-opt rocq-vernac-commands 'symbols) . 'rocq-vernac-commands)
-           (,(regexp-opt rocq-gallina-keywords 'symbols) . 'rocq-gallina-keywords)
+           (,(regexp-opt rocq-gallina-keywords 'symbols)
+            . 'rocq-gallina-keywords)
            (,(regexp-opt rocq-sorts 'symbols) . 'rocq-sorts)
            (,(regexp-opt rocq-tactics 'symbols) . 'rocq-tactics)
            (,(regexp-opt rocq-terminators 'symbols) . 'rocq-terminators)
@@ -818,7 +870,8 @@ Key bindings:
   (if rocq-follow-viewport-mode
       (progn
         (add-hook 'window-scroll-functions #'rocq-mode--scroll-function 0 t)
-        (rocq-mode--update-view (window-group-start) (window-group-end) (window-buffer)))
+        (rocq-mode--update-view (window-group-start) (window-group-end)
+                                (window-buffer)))
     (remove-hook 'window-scroll-functions #'rocq-mode--scroll-function)))
 
 (define-minor-mode rocq-auto-goals-at-point-mode

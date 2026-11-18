@@ -11,7 +11,7 @@ This package depends on [[https://github.com/joaotavora/eglot][Eglot]] for its L
 - Structured goal display;
 - Processing overlay indicator;
 - Displaying of slow commands;
-- Automatic addition of other folders containing a ~_CoqProject~ file to the workspace;
+- Automatic addition of folders containing a ~_RocqProject~ or ~_CoqProject~ file to the workspace;
 - Instant switching between on-demand and continuous mode;
 - Misc. =coq-lsp= commands like ~rocq-trim~, ~rocq-save-vo~ and ~rocq-reload-vos~.
 
@@ -49,6 +49,17 @@ If you want to turn off on-demand checking (to go back to continuous mode), use 
 To highlight slow commands, use ~rocq-toggle-timing-data~, and to toggle whether the goals being requested are shown before or after the sentence under point is executed, use ~rocq-toggle-goal-after-tactic~.
 Note that these changes are global to the =coq-lsp= session.
 You can change the default slots of ~rocq--lsp-server~ corresponding to these options using ~oset-default~, but note there is no analogue of ~setq-local~ for this, so these changes are global and not retroactive on started =coq-lsp= sessions.
+
+* Projects
+=coq-lsp= only looks for project files at the root of its workspace folders.
+Besides the folder of the current project (as determined by =project.el=), =rocq-mode= registers, for every Rocq file you open, the nearest directory above it containing one of the files in ~rocq-project-files~ (by default ~_RocqProject~ or ~_CoqProject~), so that nested projects get their own flags.
+
+If your layout is different, you can set ~rocq-project-root-function~ to a function returning the project root of the current buffer, or set ~rocq-project-root~ for a specific project with a =.dir-locals.el= file:
+#+begin_src emacs-lisp
+  ((rocq-mode . ((rocq-project-root . "../theories/"))))
+#+end_src
+
+Folders can also be added and removed by hand with ~rocq-add-workspace-folder~ and ~rocq-remove-workspace-folder~.
 
 * Default keymap
 | Keybinding  | Command                        |

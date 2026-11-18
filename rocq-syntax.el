@@ -8,7 +8,8 @@
 (defvar rocq-vernac-commands
   '("Section" "Module" "End" "Require" "Import" "Export" "Include" "Variable"
     "Variables" "Parameter" "Parameters" "Axiom" "Axioms" "Hypothesis"
-    "Hypotheses" "Notation" "Infix" "Reserved Notation" "Local" "Tactic" "Reserved" "Scope"
+    "Hypotheses" "Notation" "Infix" "Reserved Notation" "Local" "Tactic"
+    "Reserved" "Scope"
     "Open" "Close" "Bind" "Declare" "Delimit" "Definition" "Example" "Let"
     "Ltac" "Ltac2" "Fixpoint" "CoFixpoint" "Morphism" "Relation" "Implicit"
     "Arguments" "Types" "Contextual" "Strict" "Prenex"
