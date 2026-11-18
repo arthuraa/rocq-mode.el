@@ -118,18 +118,44 @@
 
 (cl-defmethod eglot-workspace-folders
   ((server rocq--lsp-server))
-  (seq-into
-   (mapcar #'rocq--workspace-folder-repr
-           (rocq-workspace-folders server))
-   'vector))
+  "Eglot's default folders (the project roots) plus the Rocq ones."
+  (vconcat
+   (mapcar #'rocq--workspace-folder-repr (rocq-workspace-folders server))
+   (cl-call-next-method)))
+
+(defun rocq--workspace-folder-p (server folder)
+  "Return non-nil if FOLDER is already a workspace folder of SERVER."
+  (let ((uri (plist-get (rocq--workspace-folder-repr folder) :uri)))
+    (seq-some (lambda (repr) (equal (plist-get repr :uri) uri))
+              (eglot-workspace-folders server))))
 
 (defun rocq-add-workspace-folder (folder)
   "Add a folder to the workspace."
   (interactive "DSelect folder to add: ")
   (let ((server (eglot--current-server-or-lose)))
-    (if (member folder (rocq-workspace-folders server))
+    (if (rocq--workspace-folder-p server folder)
         (message "%s is already in the Rocq workspace folders." folder)
       (push folder (rocq-workspace-folders server)))))
+
+(defun rocq--project-root ()
+  "Return the root of the Rocq project of the current buffer, or nil."
+  (and buffer-file-name
+       (locate-dominating-file buffer-file-name "_CoqProject")))
+
+(defun rocq--register-project-root ()
+  "Register the Rocq project of the current buffer as a workspace folder.
+
+coq-lsp looks for project files only at the root of its workspace
+folders, and picks the workspace of a file when the file is opened.
+This therefore has to run before `textDocument/didOpen' is sent, which
+is why it goes on `eglot--managed-mode-hook' rather than on the public
+`eglot-managed-mode-hook', which Eglot runs after that notification."
+  (when-let* (((eglot-managed-p))
+              (server (eglot-current-server))
+              ((cl-typep server 'rocq--lsp-server))
+              (root (rocq--project-root))
+              ((not (rocq--workspace-folder-p server root))))
+    (push root (rocq-workspace-folders server))))
 
 (defun rocq-remove-workspace-folder (folder)
   "Remove a folder to the workspace."
@@ -773,10 +799,9 @@ Outside comments, do nothing."
 
 Key bindings:
 \\{rocq-mode-map}"
-  (when-let ((server (eglot-current-server))
-             (rocq-proj-dir (locate-dominating-file (buffer-file-name) "_CoqProject"))
-             ((not (member rocq-proj-dir (rocq-workspace-folders server)))))
-    (rocq-add-workspace-folder rocq-proj-dir))
+  ;; See `rocq--register-project-root' for why the obsolete hook is used.
+  (with-suppressed-warnings ((obsolete eglot--managed-mode-hook))
+    (add-hook 'eglot--managed-mode-hook #'rocq--register-project-root nil t))
   (eglot-ensure)
   (setq-local comment-start "(*"
               comment-end "*)"
