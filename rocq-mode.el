@@ -629,6 +629,96 @@ considered slow."
                      (window-buffer window))))
 
 
+;; Filling comments
+
+(defun rocq--comment-start ()
+  "Return the start of the comment at point, or nil.
+Point counts as in a comment also when it is just before the opener
+or just after the closer."
+  (or (nth 8 (syntax-ppss))
+      (save-excursion
+        (skip-chars-forward " \t")
+        (and (looking-at "(\\*") (point)))
+      (save-excursion
+        (skip-chars-backward " \t")
+        (and (>= (- (point) 2) (point-min))
+             (string= "*)" (buffer-substring-no-properties (- (point) 2) (point)))
+             (nth 8 (syntax-ppss (1- (point))))))))
+
+(defun rocq--comment-bounds ()
+  "Return (START . END) of the comment around point, or nil if not in one."
+  (when-let ((start (rocq--comment-start)))
+    (cons start
+          (save-excursion
+            (goto-char start)
+            (if (forward-comment 1) (point) (point-max))))))
+
+(defun rocq-fill-paragraph (&optional justify)
+  "Fill the paragraph of the comment at point.
+Only the text of the comment is touched: surrounding code is never
+filled, and blank lines inside the comment separate paragraphs.
+Outside comments, do nothing."
+  (when-let ((bounds (rocq--comment-bounds)))
+    (let* ((start (car bounds))
+           (end (cdr bounds))
+           ;; Where the comment text begins: on the next line if the
+           ;; opener sits alone on its line.
+           (text-beg (save-excursion
+                       (goto-char start)
+                       (skip-chars-forward "(*")
+                       (if (looking-at "[ \t]*$")
+                           (progn (forward-line 1) (point))
+                         start)))
+           ;; Where it ends: on the previous line if the closer sits
+           ;; alone on its line.
+           (text-end (save-excursion
+                       (goto-char end)
+                       (skip-chars-backward "*)")
+                       (skip-chars-backward " \t")
+                       (if (bolp) (point) end))))
+      (when (< text-beg text-end)
+        (save-excursion
+          (goto-char (max text-beg (min (point) (1- text-end))))
+          ;; On a blank line, fill the following paragraph.
+          (when (save-excursion (beginning-of-line) (looking-at "[ \t]*$"))
+            (skip-chars-forward " \t\n" text-end))
+          (when (< (point) text-end)
+            (let* ((pt (point))
+                   (pbeg (if (re-search-backward "^[ \t]*$" text-beg t)
+                             (progn (forward-line 1) (point))
+                           text-beg))
+                   (pend (progn
+                           (goto-char pt)
+                           (if (re-search-forward "^[ \t]*$" text-end t)
+                               (match-beginning 0)
+                             text-end)))
+                   (fill-prefix
+                    (progn
+                      (goto-char pbeg)
+                      (cond
+                       ;; Several lines: indent like the second one.
+                       ((< (save-excursion (forward-line 1) (point)) pend)
+                        (forward-line 1)
+                        (skip-chars-forward " \t")
+                        (buffer-substring-no-properties
+                         (line-beginning-position) (point)))
+                       ;; One line starting with the opener: align
+                       ;; continuation lines with the text after it.
+                       ((= pbeg start)
+                        (skip-chars-forward "(*")
+                        (skip-chars-forward " \t")
+                        (make-string (current-column) ?\s))
+                       ;; One line of text: keep its indentation.
+                       (t
+                        (skip-chars-forward " \t")
+                        (buffer-substring-no-properties
+                         (line-beginning-position) (point)))))))
+              (fill-region-as-paragraph pbeg (copy-marker pend) justify)))))))
+  ;; Non-nil tells `fill-paragraph' we are done, also outside comments,
+  ;; so that code is left alone.
+  t)
+
+
 ;; General mode setup
 
 (defvar rocq-mode-syntax-table
@@ -673,7 +763,10 @@ Key bindings:
   (eglot-ensure)
   (setq-local comment-start "(*"
               comment-end "*)"
-              comment-style 'multi-line)
+              comment-start-skip "(\\*+[ \t]*"
+              comment-end-skip "[ \t]*\\*+)"
+              comment-style 'multi-line
+              fill-paragraph-function #'rocq-fill-paragraph)
   (rocq--setup-font-lock))
 
 (define-minor-mode rocq-follow-viewport-mode
