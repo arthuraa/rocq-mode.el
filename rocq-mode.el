@@ -279,6 +279,14 @@ and `shelf' keys.")
 One of `(goal . INDEX)', `(stack . (LEVEL SIDE . INDEX))' or
 `(shelf . INDEX)', indexing into `rocq--goals'.")
 
+(defcustom rocq-display-goals 'explicit
+  "When to display the goal buffer in a window.
+With `explicit', only commands you invoke, such as `rocq-request' or
+`rocq-switch-to-status', display it; automatic refreshes update it only
+if it is already visible.  With `always', every refresh displays it."
+  :type '(choice (const :tag "On explicit commands only" explicit)
+                 (const :tag "On every refresh" always)))
+
 (defcustom rocq-top-goal
   t
   "Whether to show the goal at the top or bottom."
@@ -293,7 +301,7 @@ One of `(goal . INDEX)', `(stack . (LEVEL SIDE . INDEX))' or
   :local t)
 
 (defun rocq-toggle-show-stack ()
-  ""
+  "Toggle the display of the full goal stack in the status buffer."
   (interactive)
   (setq rocq-show-stack (not rocq-show-stack))
   (rocq-refresh-status))
@@ -306,16 +314,16 @@ One of `(goal . INDEX)', `(stack . (LEVEL SIDE . INDEX))' or
   :local t)
 
 (defun rocq-toggle-show-shelf ()
-  ""
+  "Toggle the display of the shelf in the status buffer."
   (interactive)
   (setq rocq-show-shelf (not rocq-show-shelf))
   (rocq-refresh-status))
 
 (defun rocq-show-messages ()
-  ""
+  "Show the messages of the last request instead of a goal."
   (interactive)
   (setq rocq--selected-goal nil)
-  (rocq-refresh-status))
+  (rocq-refresh-status t))
 
 (defvar-keymap rocq-status-mode-map
   :doc "Keymap for Rocq interaction."
@@ -340,9 +348,20 @@ One of `(goal . INDEX)', `(stack . (LEVEL SIDE . INDEX))' or
   (get-buffer-create
    (format "*Rocq Status %s*" (buffer-name buf))))
 
+(defun rocq--display-goal-buffer ()
+  "Display the goal buffer, if it exists, without selecting it.
+A window already showing it is reused; otherwise `display-buffer'
+chooses one, which `display-buffer-alist' can customize."
+  (when-let ((buffer (get-buffer "*Rocq Goal*")))
+    (display-buffer buffer
+                    '((display-buffer-reuse-window
+                       display-buffer-reuse-mode-window)
+                      (inhibit-same-window . t)
+                      (mode . rocq-goal-mode)))))
+
 (defun rocq-switch-to-status ()
   "Switch to the status buffer for the current Rocq buffer.
-Display the buffer if needed."
+Display the status and goal buffers if needed."
   (interactive)
   (when-let
       ((action-alist
@@ -353,7 +372,8 @@ Display the buffer if needed."
         (display-buffer
          (rocq--status-buffer (current-buffer))
          action-alist)))
-    (select-window window)))
+    (select-window window)
+    (rocq--display-goal-buffer)))
 
 (defun rocq--goal-request-state ()
   "Builds a goal request state."
@@ -408,14 +428,19 @@ Display the buffer if needed."
         (insert ty)
         (newline)))))
 
-(defun rocq-request ()
-  "Request current Rocq status."
-  (interactive)
+(defun rocq-request (&optional display)
+  "Request current Rocq status.
+Interactively, or if DISPLAY is non-nil, also display the goal buffer
+once the status is known.  Otherwise, the goal buffer is only displayed
+according to `rocq-display-goals'."
+  (interactive (list t))
   (let ((serv (eglot--current-server-or-lose))
         (state (rocq--goal-request-state))
         (buf (current-buffer)))
-    (unless (equal state
-                   rocq--last-request-state)
+    (if (equal state rocq--last-request-state)
+        ;; Nothing changed since the last request, so its result is
+        ;; already in the goal buffer.
+        (when display (rocq--display-goal-buffer))
       (setq rocq--last-request-state state)
       (jsonrpc-async-request
        serv
@@ -450,7 +475,7 @@ Display the buffer if needed."
                        (if (eql (length goals) 0)
                            nil
                          `(goal . 0))))
-               (rocq-refresh-status)))))))))
+               (rocq-refresh-status display)))))))))
 
 (defun rocq--get-goal (spec)
   "Get goal corresponding to SPEC."
@@ -470,7 +495,7 @@ Display the buffer if needed."
   (if-let (goal (get-text-property (point) 'rocq--goal))
       (progn
         (setq rocq--selected-goal goal)
-        (rocq-refresh-status))
+        (rocq-refresh-status t))
     (message "No goal under point.")))
 
 (defun rocq--insert-goal-line (spec with-stack)
@@ -514,9 +539,12 @@ the goal stack."
          p (point)
          `(rocq--goal ,spec))))))
 
-(defun rocq-refresh-status ()
-  ""
-  (interactive)
+(defun rocq-refresh-status (&optional display)
+  "Redraw the status buffer and the goal buffer from the last response.
+Display the goal buffer if DISPLAY is non-nil, which is the case
+interactively, or if `rocq-display-goals' is `always'; otherwise it is
+only updated in place, wherever it is already shown."
+  (interactive (list t))
   (when-let ((inhibit-read-only t))
     (let ((p (point))
           (tot-goals 0))
@@ -561,8 +589,9 @@ the goal stack."
               (rocq--insert-goal goal)
             (mapc (eglot--lambda (text)
                     (insert text "\n"))
-                  messages))
-          (display-buffer (current-buffer))))
+                  messages)))
+        (when (or display (eq rocq-display-goals 'always))
+          (rocq--display-goal-buffer)))
       (goto-char p))))
 
 (defvar rocq--idle-goals-timer nil

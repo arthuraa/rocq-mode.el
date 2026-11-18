@@ -21,6 +21,14 @@ The status buffer shows goal numbers (and their names if they have any), and any
 One can toggle unfocused goal display (ie. outside of the current bullet or braces) with ~s f~, and shelf display with =s s=.
 Messages can be displayed using =m=.
 
+The goal buffer is only displayed by commands you invoke explicitly, such as ~rocq-request~, ~rocq-switch-to-status~ or selecting a goal; automatic refreshes update it in place if it is visible and leave your windows alone otherwise.
+Set ~rocq-display-goals~ to ~always~ to have every refresh display it.
+Where it is displayed can be customized with ~display-buffer-alist~, for instance to keep it in a side window:
+#+begin_src emacs-lisp
+  (add-to-list 'display-buffer-alist
+               '("\\*Rocq Goal\\*" display-buffer-in-side-window (side . right)))
+#+end_src
+
 * Configuration
 The recommended configuration is via ~use-package~ (see [[https://www.gnu.org/software/emacs/manual/html_mono/use-package.html][use-package's documentation]]), using the ~:vc~ keyword.
 Here is an example configuration enabling ~rocq-mode~ by default with =.v= files, as well as enabling viewport following and automatic goal request.
