@@ -543,15 +543,18 @@ request."
   :type '(number))
 
 (defun rocq--setup-goals-timer ()
-  (or rocq--idle-goals-timer
-      (setq
-       rocq--idle-goals-timer
-       (run-with-idle-timer
-        rocq-mode-idle-goals-delay nil
-        (lambda ()
-          (setq rocq--idle-goals-timer nil)
-          (when (eq major-mode 'rocq-mode)
-            (rocq-request)))))))
+  "Schedule a goal request for when Emacs goes idle.
+Nothing is scheduled while no server manages the current buffer, for
+instance after `eglot-shutdown'."
+  (when (and (eglot-managed-p) (not rocq--idle-goals-timer))
+    (setq
+     rocq--idle-goals-timer
+     (run-with-idle-timer
+      rocq-mode-idle-goals-delay nil
+      (lambda ()
+        (setq rocq--idle-goals-timer nil)
+        (when (and (eq major-mode 'rocq-mode) (eglot-managed-p))
+          (rocq-request)))))))
 
 
 ;; Processing overlay
@@ -845,6 +848,12 @@ Outside comments, do nothing."
            (,(regexp-opt rocq-terminators 'symbols) . 'rocq-terminators)
            (,(regexp-opt rocq-control 'symbols) . 'rocq-control)))))
 
+(defcustom rocq-mode-start-server t
+  "Whether to start coq-lsp automatically when entering `rocq-mode'.
+When nil, start it on demand with \[eglot].  Either way, a buffer whose
+project already has a running server is managed by it right away."
+  :type 'boolean)
+
 ;;;###autoload
 (define-derived-mode rocq-mode prog-mode "Rocq"
   "Major mode for Rocq files, using coq-lsp.
@@ -854,7 +863,8 @@ Key bindings:
   ;; See `rocq--register-project-root' for why the obsolete hook is used.
   (with-suppressed-warnings ((obsolete eglot--managed-mode-hook))
     (add-hook 'eglot--managed-mode-hook #'rocq--register-project-root nil t))
-  (eglot-ensure)
+  (when rocq-mode-start-server
+    (eglot-ensure))
   (setq-local comment-start "(*"
               comment-end "*)"
               comment-start-skip "(\\*+[ \t]*"
