@@ -79,6 +79,8 @@
    (eglot-signal-didChangeConfiguration server)))
 
 (defvar rocq-mode--timing-overlays)
+(defvar rocq-mode--processing-overlays)
+(defvar rocq--last-request-overlay)
 
 (cl-defgeneric (setf rocq-timing-data) (value server)
   ""
@@ -199,6 +201,23 @@ is why it goes on `eglot--managed-mode-hook' rather than on the public
               ((not (rocq--workspace-folder-p server root))))
     (push root (rocq-workspace-folders server))))
 
+(defun rocq--clear-overlays ()
+  "Remove the processing, timing and last request overlays of the buffer."
+  (mapc #'delete-overlay rocq-mode--processing-overlays)
+  (setq rocq-mode--processing-overlays '())
+  (mapc #'delete-overlay rocq-mode--timing-overlays)
+  (setq rocq-mode--timing-overlays '())
+  (when rocq--last-request-overlay
+    (delete-overlay rocq--last-request-overlay)))
+
+(defun rocq--on-managed-mode-change ()
+  "React to Eglot starting or stopping to manage the current buffer.
+When it stops, after `eglot-shutdown' for instance, remove the overlays
+that reflect server state, as they would otherwise linger."
+  (if (eglot-managed-p)
+      (rocq--register-project-root)
+    (rocq--clear-overlays)))
+
 (defun rocq-remove-workspace-folder (folder)
   "Remove a folder to the workspace."
   (interactive
@@ -237,12 +256,28 @@ customizable variable `rocq-mode-too-slow'."
 
 ;; Goal display
 
-(defvar-local rocq--last-request-state nil)
-(defvar-local rocq--last-request-overlay nil)
+(defvar-local rocq--last-request-state nil
+  "State of the buffer when goals were last requested, or nil.
+See `rocq--goal-request-state'.  Used to skip repeated requests for the
+same state and to ignore responses that are no longer current.")
 
-(defvar-local rocq--goals nil)
-(defvar-local rocq--messages nil)
-(defvar-local rocq--selected-goal nil)
+(defvar-local rocq--last-request-overlay nil
+  "Overlay highlighting the sentence of the last goal request, or nil.")
+
+;; The following variables are local to the status buffer.
+
+(defvar-local rocq--goals nil
+  "Goals from the last `proof/goals' response shown in the status buffer.
+This is the `goals' object of the response, with the `goals', `stack'
+and `shelf' keys.")
+
+(defvar-local rocq--messages nil
+  "Messages from the last `proof/goals' response.")
+
+(defvar-local rocq--selected-goal nil
+  "Goal currently shown in the goal buffer, or nil to show the messages.
+One of `(goal . INDEX)', `(stack . (LEVEL SIDE . INDEX))' or
+`(shelf . INDEX)', indexing into `rocq--goals'.")
 
 (defcustom rocq-top-goal
   t
@@ -530,8 +565,8 @@ the goal stack."
           (display-buffer (current-buffer))))
       (goto-char p))))
 
-(defvar rocq--idle-goals-timer
-  nil)
+(defvar rocq--idle-goals-timer nil
+  "Idle timer of the pending automatic goal request, or nil.")
 
 (defcustom rocq-mode-idle-goals-delay
   (default-value 'eglot-send-changes-idle-time)
@@ -559,9 +594,9 @@ instance after `eglot-shutdown'."
 
 ;; Processing overlay
 
-(defvar-local rocq-mode--processing-overlays
-    nil
-  "")
+(defvar-local rocq-mode--processing-overlays nil
+  "Overlays over the parts of the buffer coq-lsp has yet to check.
+Updated from `$/coq/fileProgress' notifications.")
 
 (defface rocq-mode-processing-face
   `((t :background "light gray"))
@@ -611,9 +646,9 @@ instance after `eglot-shutdown'."
 
 ;; Timing data display
 
-(defvar-local rocq-mode--timing-overlays
-    nil
-  "")
+(defvar-local rocq-mode--timing-overlays nil
+  "Overlays over the commands coq-lsp reported as slow.
+Updated from `$/coq/filePerfData' notifications; see `rocq-mode-too-slow'.")
 
 (defcustom rocq-mode-too-slow
   0.3
@@ -699,7 +734,8 @@ instance after `eglot-shutdown'."
   "Debounce time before scroll notification is sent to coq-lsp."
   :type '(number))
 
-(defvar rocq-mode--scroll-timer nil)
+(defvar rocq-mode--scroll-timer nil
+  "Timer debouncing viewport notifications to coq-lsp, or nil.")
 
 (defun rocq-mode--update-view (dstart dend buffer)
   (setq rocq-mode--scroll-timer nil)
@@ -822,7 +858,8 @@ Outside comments, do nothing."
     (modify-syntax-entry ?\( "()1" st)
     (modify-syntax-entry ?\* ". 23n" st)
     (modify-syntax-entry ?\) ")(4" st)
-    st))
+    st)
+  "Syntax table for `rocq-mode', with nestable `(* *)' comments.")
 
 (defvar-keymap rocq-mode-map
   :doc "Keymap for Rocq interaction."
@@ -861,8 +898,11 @@ project already has a running server is managed by it right away."
 Key bindings:
 \\{rocq-mode-map}"
   ;; See `rocq--register-project-root' for why the obsolete hook is used.
+  ;; Unlike `eglot-managed-mode-hook', it also runs when Eglot stops
+  ;; managing the buffer.
   (with-suppressed-warnings ((obsolete eglot--managed-mode-hook))
-    (add-hook 'eglot--managed-mode-hook #'rocq--register-project-root nil t))
+    (add-hook 'eglot--managed-mode-hook #'rocq--on-managed-mode-change
+              nil t))
   (when rocq-mode-start-server
     (eglot-ensure))
   (setq-local comment-start "(*"
