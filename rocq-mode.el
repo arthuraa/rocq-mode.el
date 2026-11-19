@@ -106,8 +106,24 @@
    (setf (slot-value server 'goal-after-tactic) value)
    (eglot-signal-didChangeConfiguration server)))
 
+;; Eglot 1.16 made its URI conversions public; keep working with
+;; older versions, which only have the internal names.
+(defalias 'rocq--path-to-uri
+  (if (fboundp 'eglot-path-to-uri)
+      #'eglot-path-to-uri
+    (with-suppressed-warnings ((obsolete eglot--path-to-uri))
+      #'eglot--path-to-uri))
+  "Return the LSP URI of a file name, see `eglot-path-to-uri'.")
+
+(defalias 'rocq--uri-to-path
+  (if (fboundp 'eglot-uri-to-path)
+      #'eglot-uri-to-path
+    (with-suppressed-warnings ((obsolete eglot--uri-to-path))
+      #'eglot--uri-to-path))
+  "Return the file name of an LSP URI, see `eglot-uri-to-path'.")
+
 (defun rocq--workspace-folder-repr (folder)
-  (list :uri (eglot--path-to-uri folder)
+  (list :uri (rocq--path-to-uri folder)
         :name (abbreviate-file-name folder)))
 
 (cl-defgeneric (setf rocq-workspace-folders) (value server)
@@ -357,7 +373,7 @@ if it is already visible.  With `always', every refresh displays it."
   "Display the goal buffer, if it exists, without selecting it.
 A window already showing it is reused; otherwise `display-buffer'
 chooses one, which `display-buffer-alist' can customize."
-  (when-let ((buffer (get-buffer "*Rocq Goal*")))
+  (when-let* ((buffer (get-buffer "*Rocq Goal*")))
     (display-buffer buffer
                     '((display-buffer-reuse-window
                        display-buffer-reuse-mode-window)
@@ -368,7 +384,7 @@ chooses one, which `display-buffer-alist' can customize."
   "Switch to the status buffer for the current Rocq buffer.
 Display the status and goal buffers if needed."
   (interactive)
-  (when-let
+  (when-let*
       ((action-alist
         `((,#'display-buffer-reuse-mode-window
            ,#'display-buffer-below-selected)
@@ -514,7 +530,7 @@ goal buffer is only displayed according to `rocq-display-goals'."
 (defun rocq-select-goal ()
   "Select goal under point."
   (interactive)
-  (if-let (goal (get-text-property (point) 'rocq--goal))
+  (if-let* ((goal (get-text-property (point) 'rocq--goal)))
       (progn
         (setq rocq--selected-goal goal)
         (rocq-refresh-status t))
@@ -535,7 +551,7 @@ the goal stack."
             0)))
     (eglot--dbind (info ty) (rocq--get-goal spec)
       (let ((p (point))
-            (name (when-let ((name-array (plist-get info :name)))
+            (name (when-let* ((name-array (plist-get info :name)))
                     (or
                      (when-let* ((dirpath (plist-get name-array :dirpath))
                                  (name-array (plist-get name-array :basename)))
@@ -567,7 +583,7 @@ Display the goal buffer if DISPLAY is non-nil, which is the case
 interactively, or if `rocq-display-goals' is `always'; otherwise it is
 only updated in place, wherever it is already shown."
   (interactive (list t))
-  (when-let ((inhibit-read-only t))
+  (let ((inhibit-read-only t))
     (let ((p (point))
           (tot-goals 0))
       (erase-buffer)
@@ -659,7 +675,7 @@ Updated from `$/coq/fileProgress' notifications.")
   :type '(number))
 
 (cl-defun rocq--update-file-progress (uri &key textDocument processing)
-  (if-let* ((path (expand-file-name (eglot--uri-to-path uri)))
+  (if-let* ((path (expand-file-name (rocq--uri-to-path uri)))
             (buffer (find-buffer-visiting path)))
       (with-current-buffer buffer
         (when (equal (eglot--VersionedTextDocumentIdentifier) textDocument)
@@ -716,7 +732,7 @@ Updated from `$/coq/filePerfData' notifications; see `rocq-mode-too-slow'.")
    &key textDocument summary timings)
   (ignore summary)
   (eglot--dbind (uri) textDocument
-    (if-let* ((path (expand-file-name (eglot--uri-to-path uri)))
+    (if-let* ((path (expand-file-name (rocq--uri-to-path uri)))
               (buffer (find-buffer-visiting path)))
         (with-current-buffer buffer
           (when (equal (eglot--VersionedTextDocumentIdentifier) textDocument)
@@ -791,7 +807,7 @@ Updated from `$/coq/filePerfData' notifications; see `rocq-mode-too-slow'.")
 (defun rocq-mode--update-view (dstart dend buffer)
   (setq rocq-mode--scroll-timer nil)
   (with-current-buffer buffer
-    (when-let ((server (eglot-current-server)))
+    (when-let* ((server (eglot-current-server)))
       (jsonrpc-notify
        server :coq/viewRange
        (list
@@ -829,7 +845,7 @@ or just after the closer."
 
 (defun rocq--comment-bounds ()
   "Return (START . END) of the comment around point, or nil if not in one."
-  (when-let ((start (rocq--comment-start)))
+  (when-let* ((start (rocq--comment-start)))
     (cons start
           (save-excursion
             (goto-char start)
@@ -840,7 +856,7 @@ or just after the closer."
 Only the text of the comment is touched: surrounding code is never
 filled, and blank lines inside the comment separate paragraphs.
 Outside comments, do nothing."
-  (when-let ((bounds (rocq--comment-bounds)))
+  (when-let* ((bounds (rocq--comment-bounds)))
     (let* ((start (car bounds))
            (end (cdr bounds))
            ;; Where the comment text begins: on the next line if the

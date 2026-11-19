@@ -3,7 +3,8 @@
 ;; Vernacular commands
 (defface rocq-vernac-commands
   `((t :inherit font-lock-keyword-face))
-  "")
+  ""
+  :group 'rocq)
 
 (defvar rocq-vernac-commands
   '("Section" "Module" "End" "Require" "Import" "Export" "Include" "Variable"
@@ -28,7 +29,8 @@
 ;; Gallina
 (defface rocq-gallina-keywords
   `((t :inherit font-lock-builtin-face))
-  "")
+  ""
+  :group 'rocq)
 
 (defvar rocq-gallina-keywords
   '("forall" "exists" "exists2" "fun" "fix" "cofix" "struct"
@@ -39,14 +41,16 @@
 ;; Sorts
 (defface rocq-sorts
   `((t :inherit font-lock-builtin-face))
-  "")
+  ""
+  :group 'rocq)
 
 (defvar rocq-sorts '("Type" "Prop" "SProp" "Set"))
 
 ;; Tactics
 (defface rocq-tactics
   `((t :inherit font-lock-function-call-face))
-  "")
+  ""
+  :group 'rocq)
 
 (defvar rocq-tactics
   '("pose" "set" "move" "case" "elim" "apply" "clear" "hnf" "intro"
@@ -65,7 +69,8 @@
 ;; Terminators
 (defface rocq-terminators
   `((t :inherit font-lock-function-call-face))
-  "")
+  ""
+  :group 'rocq)
 
 (defvar rocq-terminators
   '("by" "now" "done" "exact" "reflexivity"
@@ -76,7 +81,8 @@
 ;; Control
 (defface rocq-control
   `((t :inherit font-lock-function-call-face))
-  "")
+  ""
+  :group 'rocq)
 
 (defvar rocq-control
   '("do" "last" "first" "try" "idtac" "repeat"))
