@@ -22,6 +22,8 @@ def summarize(method, params):
         return params.get("event")
     if method.startswith("textDocument/"):
         return params.get("textDocument", {}).get("uri")
+    if method == "petanque/run":
+        return params.get("tac")
     return None
 
 while True:
@@ -48,6 +50,21 @@ while True:
         break
     if "id" in msg and method:
         result = None
+        error = None
+        if method == "petanque/get_state_at_pos":
+            result = {"st": 1, "hash": 0, "proof_finished": False, "feedback": []}
+        if method == "petanque/run":
+            # Canned outputs of a few queries, as coq-lsp 0.2.5 sends them.
+            tac = msg["params"]["tac"]
+            feedback = []
+            if tac.startswith("Search"):
+                feedback = [[3, "Nat.add_0_r: forall n : nat, n + 0 = n"],
+                            [3, "Nat.add_0_l: forall n : nat, 0 + n = n"]]
+            elif tac.startswith("Check nonexistent"):
+                error = {"code": -32003, "message": "Coq: The reference nonexistent was not found in the current environment."}
+            elif tac.startswith(("Check", "About", "Print")):
+                feedback = [[3, "%s\n     : nat" % tac.split()[1].rstrip(".")]]
+            result = {"st": msg["params"]["st"] + 1, "hash": 0, "proof_finished": False, "feedback": feedback}
         if method == "shutdown" and os.environ.get("FAKE_IGNORE_SHUTDOWN"):
             continue  # simulate a busy server that never answers
         if method == "proof/goals":
@@ -77,4 +94,7 @@ while True:
         if method == "initialize":
             result = {"capabilities": {"workspace": {"workspaceFolders": {"supported": True, "changeNotifications": True}}},
                       "serverInfo": {"name": "fake"}}
-        send({"jsonrpc": "2.0", "id": msg["id"], "result": result})
+        if error:
+            send({"jsonrpc": "2.0", "id": msg["id"], "error": error})
+        else:
+            send({"jsonrpc": "2.0", "id": msg["id"], "result": result})

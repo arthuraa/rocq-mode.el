@@ -107,6 +107,13 @@ Return the value of PREDICATE."
       (mapcar (lambda (line) (car (split-string line " ")))
               (split-string (buffer-string) "\n" t)))))
 
+(defun rocq-test-log-lines ()
+  "Return the log lines of the fake server, each a method and a summary."
+  (when (file-exists-p rocq-test-log)
+    (with-temp-buffer
+      (insert-file-contents rocq-test-log)
+      (split-string (buffer-string) "\n" t))))
+
 (defun rocq-test-method-count (method)
   "Return how many times the fake server has received METHOD."
   (cl-count method (rocq-test-log-methods) :test #'equal))
@@ -472,6 +479,79 @@ The fake server answers according to the line asked about, see
       (rocq-test-request-at-line 5)
       (should (string-prefix-p " Not in a proof" (rocq-test-header)))
       (should (string-prefix-p "Not in a proof.\n" (rocq-test-goal-text))))))
+
+;;; Queries
+
+(ert-deftest rocq-test-queries ()
+  "Queries run at point through Petanque and show up in the query buffer."
+  (skip-unless (rocq-test--server-tests-possible-p))
+  (rocq-test-with-project '(("A.v" . "Lemma a : forall n, n = n.\nProof.\n"))
+    (rocq-test-with-display-log displayed
+      (let* ((errors nil)
+             (record (lambda (message) (push message errors))))
+        (advice-add 'rocq--query-error :override record)
+        (unwind-protect
+            (progn
+              (rocq-test-open "A.v")
+              (goto-char (point-max))
+              (rocq-search "(_ + 0 = _)")
+              (should (rocq-test-wait (lambda () (get-buffer "*Rocq Query*"))))
+              (should (member "*Rocq Query*" displayed))
+              (should (equal (buffer-name) "A.v"))
+              (should (member "petanque/run \"Search (_ + 0 = _).\""
+                              (rocq-test-log-lines)))
+              (with-current-buffer "*Rocq Query*"
+                (should (eq major-mode 'rocq-query-mode))
+                (should (equal (substring-no-properties header-line-format)
+                               " Search (_ + 0 = _).  ·  2 results"))
+                (should (equal (buffer-substring-no-properties (point-min)
+                                                               (point-max))
+                               (concat "Nat.add_0_r: forall n : nat, n + 0 = n"
+                                       "\n\nNat.add_0_l: forall n : nat, "
+                                       "0 + n = n\n")))
+                (should (eq (get-text-property (point-min) 'font-lock-face)
+                            'rocq-query-name))
+                ;; Moving between results, copying and drilling down.
+                (rocq-query-next)
+                (should (looking-at "Nat.add_0_l"))
+                (rocq-query-previous)
+                (should (bobp))
+                (rocq-query-copy)
+                (should (equal (current-kill 0) "Nat.add_0_r"))
+                (rocq-query-about)
+                (should (rocq-test-wait
+                         (lambda () (string-prefix-p " About Nat.add_0_r."
+                                                     header-line-format))))
+                (should (member "petanque/run \"About Nat.add_0_r.\""
+                                (rocq-test-log-lines)))
+                ;; Inserting the name goes back to the Rocq buffer.
+                (goto-char (point-min))
+                (rocq-query-insert)
+                (should (equal (buffer-name) "A.v"))
+                (should (looking-back "Nat.add_0_r" (line-beginning-position))))
+              ;; A prefix argument sets Printing All first.
+              (rocq-check "x" t)
+              (should (rocq-test-wait
+                       (lambda ()
+                         (member "petanque/run \"Check x.\""
+                                 (rocq-test-log-lines)))))
+              (should (member "petanque/run \"Set Printing All.\""
+                              (rocq-test-log-lines)))
+              (should (string-suffix-p "Printing All"
+                                       (buffer-local-value
+                                        'header-line-format
+                                        (get-buffer "*Rocq Query*"))))
+              ;; Errors go to the echo area and leave the buffer alone.
+              (rocq-check "nonexistent")
+              (should (rocq-test-wait (lambda () errors)))
+              (should (equal errors
+                             '("The reference nonexistent was not found in \
+the current environment.")))
+              (should (string-prefix-p " Check x."
+                                       (buffer-local-value
+                                        'header-line-format
+                                        (get-buffer "*Rocq Query*")))))
+          (advice-remove 'rocq--query-error record))))))
 
 ;;; Indentation
 

@@ -925,6 +925,306 @@ according to `rocq-display-goals'."
                  (rocq--set-goals buf goals messages error)
                  (rocq--refresh-goals display 'preserve))))))))))
 
+;; Queries
+
+;; Queries such as `Search' run through coq-lsp's Petanque API: the
+;; state of the document at point is fetched with
+;; `petanque/get_state_at_pos', the command runs in that state with
+;; `petanque/run', and its output is shown in the query buffer.  The
+;; document itself is not touched.
+
+(defface rocq-query-name
+  '((t :inherit font-lock-function-name-face))
+  "Face of the names of query results.")
+
+(defvar rocq-search-history nil
+  "History of the arguments of `rocq-search' and `rocq-search-pattern'.")
+
+(defvar rocq-check-history nil
+  "History of the arguments of `rocq-check', `rocq-print' and `rocq-about'.")
+
+(defvar rocq-locate-history nil
+  "History of the arguments of `rocq-locate'.")
+
+(defconst rocq--query-buffer-name "*Rocq Query*"
+  "Name of the query buffer.")
+
+;; The following variables are local to the query buffer.
+
+(defvar-local rocq--query nil
+  "The query shown, a plist with `:command', `:printing-all', `:source'
+and `:position', see `rocq--query'.")
+
+(defvar-local rocq--query-entries nil
+  "Markers at the start of each result of the query shown.")
+
+(defvar-keymap rocq-query-prefix-map
+  :doc "Keymap of the query commands, under \\`C-c C-a'.
+The bindings follow Proof General."
+  "C-a" #'rocq-search
+  "C-s" #'rocq-search
+  "C-o" #'rocq-search-pattern
+  "C-c" #'rocq-check
+  "C-p" #'rocq-print
+  "C-b" #'rocq-about
+  "C-l" #'rocq-locate)
+
+(defvar-keymap rocq-query-mode-map
+  :doc "Keymap of the query buffer."
+  "n" #'rocq-query-next
+  "p" #'rocq-query-previous
+  "RET" #'rocq-query-about
+  "i" #'rocq-query-insert
+  "w" #'rocq-query-copy
+  "g" #'rocq-query-rerun
+  "C-c C-a" rocq-query-prefix-map)
+
+(define-derived-mode rocq-query-mode special-mode "Rocq Query"
+  "Major mode of the query buffer, showing the output of a query.
+\\<rocq-query-mode-map>\\[rocq-query-next] and \\[rocq-query-previous]
+move between results, \\[rocq-query-about] runs `About' on the result
+at point, \\[rocq-query-insert] inserts its name in the Rocq buffer,
+\\[rocq-query-copy] copies it and \\[rocq-query-rerun] runs the query
+again.  The query commands under \\`C-c C-a' work here too, at the
+position of the query.
+
+\\{rocq-query-mode-map}"
+  (setq-local truncate-lines nil)
+  (rocq--setup-font-lock))
+
+(defun rocq--symbol-at-point ()
+  "Return the qualified identifier at point, or nil."
+  (save-excursion
+    (skip-chars-backward "[:alnum:]_'.")
+    (let ((start (point)))
+      (skip-chars-forward "[:alnum:]_'.")
+      (let ((name (string-trim (buffer-substring-no-properties start (point))
+                               "\\.+" "\\.+")))
+        (and (not (string-empty-p name)) name)))))
+
+(defun rocq--read-query-argument (prompt history)
+  "Read the argument of a query with PROMPT and HISTORY.
+The identifier at point is the default."
+  (let ((default (rocq--symbol-at-point)))
+    (read-string (format-prompt prompt default) nil history default)))
+
+(defun rocq--query-context ()
+  "Return (SOURCE . POSITION): the Rocq buffer and position to query at.
+In a Rocq buffer, that is point; in the query buffer, the position of
+the query shown."
+  (cond
+   ((derived-mode-p 'rocq-mode) (cons (current-buffer) (point)))
+   ((and (derived-mode-p 'rocq-query-mode)
+         (buffer-live-p (plist-get rocq--query :source)))
+    (cons (plist-get rocq--query :source) (plist-get rocq--query :position)))
+   (t (user-error "Not in a Rocq buffer"))))
+
+(defun rocq--query-error (message)
+  "Report MESSAGE, the error of a query, in the echo area."
+  (message "%s" (propertize message 'face 'error)))
+
+(defun rocq--petanque (server method params success)
+  "Send the Petanque request METHOD with PARAMS to SERVER.
+Call SUCCESS with the result; report errors in the echo area."
+  (jsonrpc-async-request
+   server method params
+   :success-fn success
+   :error-fn (lambda (error)
+               (rocq--query-error
+                (if (eql (plist-get error :code) -32601)
+                    (concat "This coq-lsp has no Petanque API; "
+                            "queries need 0.2 or later")
+                  (string-remove-prefix "Coq: " (plist-get error :message)))))
+   :timeout-fn (lambda () (rocq--query-error "coq-lsp did not answer"))))
+
+(defun rocq--query (command &optional printing-all)
+  "Run COMMAND, a vernacular sentence, at the state at point.
+Show its output in the query buffer.  With PRINTING-ALL, run it under
+`Set Printing All'.  See `rocq--query-context' for where it runs."
+  (pcase-let ((`(,source . ,position) (rocq--query-context)))
+    (with-current-buffer source
+      (save-excursion
+        (goto-char position)
+        (let ((server (rocq--ensure-server))
+              (query (list :command command :printing-all printing-all
+                           :source source :position (copy-marker position))))
+          (message "Running %s" command)
+          (rocq--petanque
+           server :petanque/get_state_at_pos
+           (list :uri (plist-get (eglot--TextDocumentIdentifier) :uri)
+                 :position (eglot--pos-to-lsp-position))
+           (lambda (result)
+             (rocq--query-at-state server (plist-get result :st) query
+                                   printing-all))))))))
+
+(defun rocq--query-at-state (server state query &optional printing-all)
+  "Run QUERY in STATE of SERVER and show its output.
+With PRINTING-ALL, first move to the state after `Set Printing All'."
+  (rocq--petanque
+   server :petanque/run
+   (list :st state :tac (if printing-all
+                            "Set Printing All."
+                          (plist-get query :command)))
+   (lambda (result)
+     (if printing-all
+         (rocq--query-at-state server (plist-get result :st) query)
+       (rocq--show-query query (plist-get result :feedback))))))
+
+(defun rocq--query-header (query count)
+  "Return the header line of the query buffer for QUERY with COUNT results."
+  (let ((command (plist-get query :command)))
+    (concat " " command
+            (and (string-prefix-p "Search" command)
+                 (format "  ·  %s" (rocq--plural count "result")))
+            (and (plist-get query :printing-all) "  ·  Printing All"))))
+
+(defun rocq--insert-query-entry (level text)
+  "Insert TEXT, one message of a query output at LEVEL."
+  (let ((start (point))
+        (face (pcase level (1 'error) (2 'warning))))
+    (insert text)
+    (unless (bolp) (insert "\n"))
+    (save-excursion
+      (goto-char start)
+      ;; Results of `Search' are "name: statement".
+      (when (looking-at "\\([^][ \t\n:(){},\"]+\\):\\(?:[ \t\n]\\|\\'\\)")
+        (let ((name (match-string-no-properties 1)))
+          (put-text-property start (point) 'rocq--query-name name)
+          (put-text-property (match-beginning 1) (match-end 1)
+                             'font-lock-face 'rocq-query-name))))
+    (when face
+      (put-text-property start (point) 'font-lock-face face))))
+
+(defun rocq--show-query (query feedback)
+  "Show FEEDBACK, the messages output by QUERY, in the query buffer."
+  (let ((buffer (get-buffer-create rocq--query-buffer-name))
+        (count (length feedback)))
+    (with-current-buffer buffer
+      (unless (derived-mode-p 'rocq-query-mode)
+        (rocq-query-mode))
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (setq rocq--query query
+              rocq--query-entries nil)
+        (seq-doseq (entry feedback)
+          (unless (bobp) (insert "\n"))
+          (push (point-marker) rocq--query-entries)
+          (rocq--insert-query-entry (elt entry 0) (elt entry 1)))
+        (setq rocq--query-entries (nreverse rocq--query-entries))
+        (when (zerop count)
+          (insert (propertize "No output." 'font-lock-face 'shadow) "\n")))
+      (setq header-line-format (rocq--query-header query count))
+      (goto-char (point-min)))
+    (dolist (window (get-buffer-window-list buffer nil t))
+      (set-window-point window (point-min)))
+    (display-buffer buffer '((display-buffer-reuse-window
+                              display-buffer-reuse-mode-window)
+                             (inhibit-same-window . t)
+                             (mode . rocq-query-mode)))
+    (message "%s" (string-trim (rocq--query-header query count)))))
+
+(defun rocq-search (pattern)
+  "Run `Search PATTERN' at the state of the sentence at point.
+The results are shown in the query buffer, see `rocq-query-mode'."
+  (interactive (list (rocq--read-query-argument "Search" 'rocq-search-history)))
+  (rocq--query (format "Search %s." pattern)))
+
+(defun rocq-search-pattern (pattern)
+  "Run `SearchPattern PATTERN' at the state of the sentence at point."
+  (interactive (list (rocq--read-query-argument "SearchPattern"
+                                                'rocq-search-history)))
+  (rocq--query (format "SearchPattern %s." pattern)))
+
+(defun rocq-check (term &optional printing-all)
+  "Run `Check TERM' at the state of the sentence at point.
+With a prefix argument, or PRINTING-ALL non-nil, under `Set Printing All'."
+  (interactive (list (rocq--read-query-argument "Check" 'rocq-check-history)
+                     current-prefix-arg))
+  (rocq--query (format "Check %s." term) printing-all))
+
+(defun rocq-print (name &optional printing-all)
+  "Run `Print NAME' at the state of the sentence at point.
+With a prefix argument, or PRINTING-ALL non-nil, under `Set Printing All'."
+  (interactive (list (rocq--read-query-argument "Print" 'rocq-check-history)
+                     current-prefix-arg))
+  (rocq--query (format "Print %s." name) printing-all))
+
+(defun rocq-about (name &optional printing-all)
+  "Run `About NAME' at the state of the sentence at point.
+With a prefix argument, or PRINTING-ALL non-nil, under `Set Printing All'."
+  (interactive (list (rocq--read-query-argument "About" 'rocq-check-history)
+                     current-prefix-arg))
+  (rocq--query (format "About %s." name) printing-all))
+
+(defun rocq-locate (name)
+  "Run `Locate NAME' at the state of the sentence at point.
+NAME is quoted when it is not an identifier, to locate a notation."
+  (interactive (list (rocq--read-query-argument "Locate" 'rocq-locate-history)))
+  (rocq--query (format "Locate %s."
+                       (if (string-match-p "\\`[[:alnum:]_'.]+\\'\\|\\`\"" name)
+                           name
+                         (format "%S" name)))))
+
+(defun rocq--query-name-at-point ()
+  "Return the name of the result at point, or the identifier at point."
+  (or (get-text-property (point) 'rocq--query-name)
+      (rocq--symbol-at-point)
+      (user-error "No name at point")))
+
+(defun rocq-query-next (&optional arg)
+  "Move to the next result of the query, ARG times."
+  (interactive "p")
+  (setq arg (or arg 1))
+  (let ((entries rocq--query-entries))
+    (if (< arg 0)
+        (rocq-query-previous (- arg))
+      (dotimes (_ arg)
+        (when-let* ((next (cl-find-if (lambda (marker) (> marker (point)))
+                                      entries)))
+          (goto-char next))))))
+
+(defun rocq-query-previous (&optional arg)
+  "Move to the previous result of the query, ARG times."
+  (interactive "p")
+  (setq arg (or arg 1))
+  (if (< arg 0)
+      (rocq-query-next (- arg))
+    (dotimes (_ arg)
+      (when-let* ((previous (cl-find-if (lambda (marker) (< marker (point)))
+                                        (reverse rocq--query-entries))))
+        (goto-char previous)))))
+
+(defun rocq-query-about ()
+  "Run `About' on the result at point."
+  (interactive)
+  (rocq-about (rocq--query-name-at-point)))
+
+(defun rocq-query-copy ()
+  "Copy the name of the result at point."
+  (interactive)
+  (let ((name (rocq--query-name-at-point)))
+    (kill-new name)
+    (message "Copied %s" name)))
+
+(defun rocq-query-insert ()
+  "Insert the name of the result at point in the Rocq buffer, and go there."
+  (interactive)
+  (let ((name (rocq--query-name-at-point))
+        (source (plist-get rocq--query :source)))
+    (unless (buffer-live-p source)
+      (user-error "The Rocq buffer of the query is gone"))
+    (pop-to-buffer source '(display-buffer-reuse-window
+                            (inhibit-same-window . t)))
+    (insert name)))
+
+(defun rocq-query-rerun ()
+  "Run the query shown again, at the same position."
+  (interactive)
+  (unless rocq--query
+    (user-error "No query to run again"))
+  (rocq--query (plist-get rocq--query :command)
+               (plist-get rocq--query :printing-all)))
+
 (defvar rocq--idle-goals-timer nil
   "Idle timer of the pending automatic goal request, or nil.")
 
@@ -1235,6 +1535,7 @@ Outside comments, do nothing."
   "C-c C-p" #'rocq-previous-goal
   "C-c C-s" #'rocq-save-vo
   "C-c C-r" #'rocq-reload-vos
+  "C-c C-a" rocq-query-prefix-map
   "M-a" #'rocq-backward-sentence
   "M-e" #'rocq-forward-sentence)
 

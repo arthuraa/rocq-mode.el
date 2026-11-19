@@ -15,6 +15,7 @@ This package depends on [[https://github.com/joaotavora/eglot][Eglot]] for its L
 - Instant switching between on-demand and continuous mode;
 - Indentation of proofs, bullets, =match= branches and terms;
 - Motion by sentence with =M-a= and =M-e=;
+- Queries such as =Search= and =Check= at point, without editing the file;
 - Misc. =coq-lsp= commands like ~rocq-trim~, ~rocq-save-vo~ and ~rocq-reload-vos~.
 
 * Using =rocq-mode=
@@ -45,6 +46,20 @@ in a side window:
   (add-to-list 'display-buffer-alist
                '("\\*Rocq Goal\\*" display-buffer-in-side-window (side . right)))
 #+end_src
+
+* Queries
+=C-c C-a= prefixes queries that run at the state of the sentence at point,
+without touching the file, and show their output in the =*Rocq Query*= buffer.
+The bindings follow Proof General: =C-c C-a C-a= or =C-c C-a C-s= for =Search=,
+=C-c C-a C-o= for =SearchPattern=, =C-c C-a C-c= for =Check=, =C-c C-a C-p= for
+=Print=, =C-c C-a C-b= for =About= and =C-c C-a C-l= for =Locate=, which quotes
+notations for you.  Each prompts with the identifier at point as default and
+keeps its own history, and a prefix argument runs =Check=, =Print= and =About=
+under =Set Printing All=.  In the query buffer, =n= and =p= move between
+results, =RET= runs =About= on the result at point, =i= inserts its name in the
+Rocq buffer, =w= copies it, =g= runs the query again and the =C-c C-a= commands
+work at the position of the query.  Queries need coq-lsp 0.2 or later, whose
+Petanque API runs them.
 
 * Indentation
 =TAB= indents the current line and =M-x indent-region= a region, following the
@@ -146,6 +161,7 @@ and ~rocq-remove-workspace-folder~.
 | =C-c C-c=   | ~rocq-switch-to-goals~         |
 | =C-c C-n=   | ~rocq-next-goal~               |
 | =C-c C-p=   | ~rocq-previous-goal~           |
+| =C-c C-a=   | query commands, see above      |
 | =C-c C-s=   | ~rocq-save-vo~                 |
 | =C-c C-r=   | ~rocq-reload-vos~              |
 | =M-a=       | ~rocq-backward-sentence~       |
