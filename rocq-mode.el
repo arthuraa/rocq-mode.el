@@ -292,25 +292,42 @@ are shown, so that the request that starts the server with
 \\[rocq-request] still brings the goal buffer up when an automatic
 request supersedes it before its response arrives.")
 
-;; The following variables are local to the status buffer.
+;; The following variables are local to the goal buffer.
 
 (defvar-local rocq--goals nil
-  "Goals from the last `proof/goals' response shown in the status buffer.
-This is the `goals' object of the response, with the `goals', `stack'
-and `shelf' keys.")
+  "Goals from the last `proof/goals' response, or nil outside a proof.
+This is the `goals' object of the response, with the `goals', `stack',
+`shelf' and `given_up' keys.")
 
 (defvar-local rocq--messages nil
-  "Messages from the last `proof/goals' response.")
+  "Messages from the last `proof/goals' response.
+Each is a string or a plist with `:level' and `:text'.")
+
+(defvar-local rocq--error nil
+  "Error of the sentence of the last `proof/goals' response, or nil.")
+
+(defvar-local rocq--source nil
+  "The Rocq buffer whose goals the goal buffer shows.")
 
 (defvar-local rocq--selected-goal nil
-  "Goal currently shown in the goal buffer, or nil to show the messages.
-One of `(goal . INDEX)', `(stack . (LEVEL SIDE . INDEX))' or
-`(shelf . INDEX)', indexing into `rocq--goals'.")
+  "Goal shown by the focused view of the goal buffer, or nil if none.
+One of `(goal . INDEX)', `(stack . (LEVEL SIDE . INDEX))',
+`(shelf . INDEX)' or `(given-up . INDEX)', indexing into `rocq--goals'.")
+
+(defvar-local rocq--selected-evar nil
+  "Existential variable of the selected goal, if known.
+It identifies the goal across responses, so that the selection follows
+it while it exists.")
+
+(defvar-local rocq--view 'goal
+  "What the goal buffer shows.
+With `goal', the selected goal in full; with `summary', one line per
+goal, to pick one.")
 
 (defcustom rocq-display-goals 'explicit
   "When to display the goal buffer in a window.
 With `explicit', only commands you invoke, such as `rocq-request' or
-`rocq-switch-to-status', display it; automatic refreshes update it only
+`rocq-switch-to-goals', display it; automatic refreshes update it only
 if it is already visible.  With `always', every refresh displays it."
   :type '(choice (const :tag "On explicit commands only" explicit)
                  (const :tag "On every refresh" always)))
@@ -323,85 +340,73 @@ if it is already visible.  With `always', every refresh displays it."
 
 (defcustom rocq-show-stack
   nil
-  "Whether to show the full goal stack."
+  "Whether the goal summary lists unfocused goals, around the focused ones.
+When nil, it only counts them.  Toggle it with \\<rocq-goal-mode-map>\
+\\[rocq-toggle-show-stack] in the goal buffer."
   :type '(choice (const :tag "Show the stack" t)
                  (const :tag "Don't show the stack" nil))
   :local t)
 
-(defun rocq-toggle-show-stack ()
-  "Toggle the display of the full goal stack in the status buffer."
-  (interactive)
-  (setq rocq-show-stack (not rocq-show-stack))
-  (rocq-refresh-status))
-
 (defcustom rocq-show-shelf
   nil
-  "Whether to show the shelf."
+  "Whether the goal summary lists shelved and given up goals.
+When nil, it only counts them.  Toggle it with \\<rocq-goal-mode-map>\
+\\[rocq-toggle-show-shelf] in the goal buffer."
   :type '(choice (const :tag "Show the shelf" t)
                  (const :tag "Don't show the shelf" nil))
   :local t)
 
-(defun rocq-toggle-show-shelf ()
-  "Toggle the display of the shelf in the status buffer."
-  (interactive)
-  (setq rocq-show-shelf (not rocq-show-shelf))
-  (rocq-refresh-status))
+(defconst rocq--goal-buffer-name "*Rocq Goal*"
+  "Name of the goal buffer.")
 
-(defun rocq-show-messages ()
-  "Show the messages of the last request instead of a goal."
-  (interactive)
-  (setq rocq--selected-goal nil)
-  (rocq-refresh-status t))
-
-(defvar-keymap rocq-status-mode-map
-  :doc "Keymap for Rocq interaction."
+(defvar-keymap rocq-goal-mode-map
+  :doc "Keymap of the goal buffer."
+  "n" #'rocq-next-goal
+  "p" #'rocq-previous-goal
+  "TAB" #'rocq-toggle-goals-view
   "RET" #'rocq-select-goal
+  "q" #'rocq-goals-quit
+  "C-c C-c" #'rocq-goals-quit
   "s f" #'rocq-toggle-show-stack
-  "s s" #'rocq-toggle-show-shelf
-  "m" #'rocq-show-messages)
+  "s s" #'rocq-toggle-show-shelf)
 
-(define-derived-mode rocq-status-mode special-mode "Rocq Status"
-  "Rocq Status"
-  (rocq--setup-font-lock))
+(dolist (digit (number-sequence ?1 ?9))
+  (keymap-set rocq-goal-mode-map (string digit) #'rocq-select-goal-number))
 
 (define-derived-mode rocq-goal-mode special-mode "Rocq Goal"
-  "Rocq Goal"
+  "Major mode of the goal buffer.
+The buffer shows either the selected goal in full or a summary of all
+goals; \\<rocq-goal-mode-map>\\[rocq-toggle-goals-view] switches between
+the two.  \\[rocq-next-goal] and \\[rocq-previous-goal] cycle through
+the focused goals, a digit selects a goal by number, and in the summary
+\\[rocq-select-goal] selects the goal on the line.  \\[rocq-goals-quit]
+goes back to the Rocq buffer.
+
+\\{rocq-goal-mode-map}"
+  (setq-local truncate-lines nil)
   (rocq--setup-font-lock))
 
-(defun rocq--status-buffer (buf)
-  ""
-  (unless (with-current-buffer buf
-            (derived-mode-p 'rocq-mode))
-    (error "Buffer is not a Rocq buffer."))
-  (get-buffer-create
-   (format "*Rocq Status %s*" (buffer-name buf))))
+(defun rocq--goal-buffer ()
+  "Return the goal buffer, creating it if needed."
+  (let ((buffer (get-buffer-create rocq--goal-buffer-name)))
+    (with-current-buffer buffer
+      (unless (derived-mode-p 'rocq-goal-mode)
+        (rocq-goal-mode)))
+    buffer))
 
 (defun rocq--display-goal-buffer ()
   "Display the goal buffer, if it exists, without selecting it.
 A window already showing it is reused; otherwise `display-buffer'
-chooses one, which `display-buffer-alist' can customize."
-  (when-let* ((buffer (get-buffer "*Rocq Goal*")))
-    (display-buffer buffer
-                    '((display-buffer-reuse-window
-                       display-buffer-reuse-mode-window)
-                      (inhibit-same-window . t)
-                      (mode . rocq-goal-mode)))))
-
-(defun rocq-switch-to-status ()
-  "Switch to the status buffer for the current Rocq buffer.
-Display the status and goal buffers if needed."
-  (interactive)
-  (when-let*
-      ((action-alist
-        `((,#'display-buffer-reuse-mode-window
-           ,#'display-buffer-below-selected)
-          (mode . rocq-status-mode)))
-       (window
-        (display-buffer
-         (rocq--status-buffer (current-buffer))
-         action-alist)))
-    (select-window window)
-    (rocq--display-goal-buffer)))
+chooses one, which `display-buffer-alist' can customize.  Return the
+window."
+  (when-let* ((buffer (get-buffer rocq--goal-buffer-name)))
+    (if (eq (window-buffer) buffer)
+        (selected-window)
+      (display-buffer buffer
+                      '((display-buffer-reuse-window
+                         display-buffer-reuse-mode-window)
+                        (inhibit-same-window . t)
+                        (mode . rocq-goal-mode))))))
 
 (defun rocq--goal-request-state ()
   "Return the state of the buffer that the goals at point depend on.
@@ -420,6 +425,7 @@ supersede the one that started the server."
   "Face for sentence of last goal request.")
 
 (defun rocq-go-to-last-request ()
+  "Move point to the sentence of the last goal request."
   (interactive)
   (if-let* ((overlay rocq--last-request-overlay)
             (pos (overlay-start overlay)))
@@ -427,6 +433,149 @@ supersede the one that started the server."
     (message "%s"
              (propertize "No last goal request to go back to."
                          'face 'error))))
+
+;;;; Goal data
+
+(defun rocq--get-goal (spec)
+  "Return the goal SPEC designates in `rocq--goals', or nil."
+  (eglot--dbind (goals stack shelf given_up) rocq--goals
+    (ignore-errors
+      (pcase spec
+        (`(goal . ,i) (aref goals i))
+        (`(stack . (,height ,side . ,num))
+         (aref (elt (aref stack height) side) num))
+        (`(shelf . ,i) (aref shelf i))
+        (`(given-up . ,i) (aref given_up i))))))
+
+(defun rocq--goal-specs ()
+  "Return the specs of all goals of `rocq--goals', focused ones first."
+  (eglot--dbind (goals stack shelf given_up) rocq--goals
+    (append
+     (cl-loop for i below (length goals) collect `(goal . ,i))
+     (cl-loop for height below (length stack)
+              append (cl-loop for side in '(0 1)
+                              append (cl-loop for num below
+                                              (length (elt (aref stack height)
+                                                           side))
+                                              collect
+                                              `(stack . (,height ,side
+                                                         . ,num)))))
+     (cl-loop for i below (length shelf) collect `(shelf . ,i))
+     (cl-loop for i below (length given_up) collect `(given-up . ,i)))))
+
+(defun rocq--focused-count ()
+  "Return the number of focused goals."
+  (length (plist-get rocq--goals :goals)))
+
+(defun rocq--unfocused-count ()
+  "Return the number of unfocused goals, those outside the current bullet."
+  (cl-loop for level across (plist-get rocq--goals :stack)
+           sum (+ (length (elt level 0)) (length (elt level 1)))))
+
+(defun rocq--goal-evar (goal)
+  "Return the existential variable of GOAL, or nil."
+  (plist-get (plist-get goal :info) :evar))
+
+(defun rocq--goal-name (goal)
+  "Return the name of GOAL, or nil if it has none."
+  (let ((name (plist-get (plist-get goal :info) :name)))
+    (cond
+     ((stringp name) name)
+     ((and (vectorp name) (> (length name) 1))
+      (if-let* ((dirpath (plist-get name :dirpath))
+                (basename (plist-get name :basename)))
+          (mapconcat (lambda (x) (elt x 1))
+                     (nreverse (vconcat (vector basename) (elt dirpath 1)))
+                     ".")
+        (elt name 1))))))
+
+(defun rocq--select (spec)
+  "Make SPEC the selected goal."
+  (setq rocq--selected-goal spec
+        rocq--selected-evar (rocq--goal-evar (rocq--get-goal spec))))
+
+(defun rocq--set-goals (source goals messages error)
+  "Record a response in the goal buffer.
+SOURCE is the Rocq buffer it is about, and GOALS, MESSAGES and ERROR
+its fields.  The selected goal is kept if it still exists; otherwise
+the first focused goal is selected."
+  (setq rocq--source source
+        rocq--goals goals
+        rocq--messages (append messages nil)
+        rocq--error error)
+  (rocq--select
+   (or (and rocq--selected-evar
+            (cl-find-if (lambda (spec)
+                          (equal (rocq--goal-evar (rocq--get-goal spec))
+                                 rocq--selected-evar))
+                        (rocq--goal-specs)))
+       (and (> (rocq--focused-count) 0) '(goal . 0)))))
+
+;;;; Rendering
+
+(defun rocq--plural (count noun)
+  "Return COUNT and NOUN, with NOUN in the plural if COUNT is not 1."
+  (format "%d %s%s" count noun (if (= count 1) "" "s")))
+
+(defun rocq--no-goals-text ()
+  "Return the text explaining why there is no focused goal."
+  (let ((unfocused (rocq--unfocused-count))
+        (shelved (length (plist-get rocq--goals :shelf)))
+        (given-up (length (plist-get rocq--goals :given_up))))
+    (cond
+     ((null rocq--goals) "Not in a proof.")
+     ((> unfocused 0)
+      (format "This subproof is complete, but there %s %s."
+              (if (= unfocused 1) "is" "are")
+              (rocq--plural unfocused "unfocused goal")))
+     ((or (> shelved 0) (> given-up 0))
+      (format "No more goals, but there %s %s."
+              (if (= (+ shelved given-up) 1) "is" "are")
+              (string-join
+               (delq nil
+                     (list (and (> shelved 0)
+                                (rocq--plural shelved "shelved goal"))
+                           (and (> given-up 0)
+                                (rocq--plural given-up "given up goal"))))
+               " and ")))
+     (t "No more goals."))))
+
+(defun rocq--goal-header ()
+  "Return the header line of the goal buffer."
+  (let* ((focused (rocq--focused-count))
+         (unfocused (rocq--unfocused-count))
+         (shelved (length (plist-get rocq--goals :shelf)))
+         (given-up (length (plist-get rocq--goals :given_up)))
+         (name (rocq--goal-name (rocq--get-goal rocq--selected-goal)))
+         (name (if name (format " (%s)" name) ""))
+         (summary (eq rocq--view 'summary))
+         (main
+          (cond
+           ((null rocq--goals) "Not in a proof")
+           (summary (rocq--plural focused "goal"))
+           ((null rocq--selected-goal)
+            (if (zerop (+ unfocused shelved given-up))
+                "No more goals"
+              "No focused goals"))
+           (t (pcase rocq--selected-goal
+                (`(goal . ,i) (format "Goal %d/%d%s" (1+ i) focused name))
+                (`(stack . ,_) (concat "Unfocused goal" name))
+                (`(shelf . ,i) (format "Shelved goal %d/%d%s" (1+ i) shelved
+                                       name))
+                (`(given-up . ,i) (format "Given up goal %d/%d%s" (1+ i)
+                                          given-up name))))))
+         (parts
+          (delq nil
+                (list main
+                      (and (> unfocused 0) (format "%d unfocused" unfocused))
+                      (and (> shelved 0) (format "%d shelved" shelved))
+                      (and (> given-up 0) (format "%d given up" given-up))
+                      (and rocq--error "error")
+                      (and rocq--messages
+                           (rocq--plural (length rocq--messages) "message"))))))
+    (concat " " (string-join parts "  ·  ")
+            (propertize (if summary "   TAB: selected goal" "   TAB: all goals")
+                        'face 'shadow))))
 
 (defun rocq--insert-separator ()
   "Insert a separator between hypotheses and goal."
@@ -459,6 +608,240 @@ supersede the one that started the server."
         (rocq--insert-separator)
         (insert ty)
         (newline)))))
+
+(defun rocq--insert-message (message)
+  "Insert MESSAGE, a string or a plist with `:level' and `:text'."
+  (let* ((text (if (stringp message) message (plist-get message :text)))
+         (level (and (listp message) (plist-get message :level)))
+         (face (pcase level (1 'error) (2 'warning))))
+    (insert (if face (propertize text 'font-lock-face face) text) "\n")))
+
+(defun rocq--insert-focused-view ()
+  "Insert the selected goal, with the error and messages of the sentence."
+  (when rocq--error
+    (insert (propertize rocq--error 'font-lock-face 'error) "\n\n"))
+  (if-let* ((goal (rocq--get-goal rocq--selected-goal)))
+      (rocq--insert-goal goal)
+    (insert (rocq--no-goals-text) "\n"))
+  (when rocq--messages
+    (insert "\n" (propertize "Messages" 'font-lock-face 'bold) "\n")
+    (mapc #'rocq--insert-message rocq--messages)))
+
+(defun rocq--insert-goal-line (spec indent)
+  "Insert a summary line for the goal SPEC, indented by INDENT columns."
+  (let* ((goal (rocq--get-goal spec))
+         (name (rocq--goal-name goal))
+         (number (pcase spec (`(goal . ,i) (1+ i))))
+         (start (point)))
+    (insert (if (equal spec rocq--selected-goal) "▶ " "  ")
+            (make-string indent ?\s))
+    (when number
+      (insert (format "%d" number)))
+    (when name
+      (insert (format "(%s)" name)))
+    (when (or number name)
+      (insert ": "))
+    (insert (propertize (string-trim (replace-regexp-in-string
+                                      "[ \t\n]+" " " (plist-get goal :ty)))
+                        'font-lock-face 'rocq-goal-face))
+    (insert "\n")
+    (put-text-property start (point) 'rocq--goal spec)))
+
+(defun rocq--insert-section (title specs shown toggle)
+  "Insert the goals SPECS under TITLE, or only their count if SHOWN is nil.
+TOGGLE is the variable controlling SHOWN, which \\<rocq-goal-mode-map>\
+\\[rocq-select-goal] on the title flips."
+  (when specs
+    (insert "\n")
+    (let ((start (point)))
+      (insert (propertize (format "%s (%d)%s" title (length specs)
+                                  (if shown "" "  RET to show"))
+                          'font-lock-face 'bold)
+              "\n")
+      (put-text-property start (point) 'rocq--toggle toggle))
+    (when shown
+      (mapc (lambda (spec) (rocq--insert-goal-line spec 0)) specs))))
+
+(defun rocq--insert-summary-view ()
+  "Insert one line per goal, with the unfocused ones around them if shown."
+  (eglot--dbind (goals stack shelf given_up) rocq--goals
+    (let ((depth (length stack)))
+      (when rocq-show-stack
+        (cl-loop for height from (1- depth) downto 0
+                 do (dotimes (num (length (elt (aref stack height) 0)))
+                      (rocq--insert-goal-line `(stack . (,height 0 . ,num))
+                                              (- depth height 1)))))
+      (if (zerop (length goals))
+          (insert (if rocq-show-stack (make-string (+ depth 2) ?\s) "")
+                  (rocq--no-goals-text) "\n")
+        (dotimes (i (length goals))
+          (rocq--insert-goal-line `(goal . ,i) (if rocq-show-stack depth 0))))
+      (when rocq-show-stack
+        (cl-loop for height below depth
+                 do (dotimes (num (length (elt (aref stack height) 1)))
+                      (rocq--insert-goal-line `(stack . (,height 1 . ,num))
+                                              (- depth height 1)))))
+      (unless rocq-show-stack
+        (rocq--insert-section
+         "Unfocused" (cl-remove-if-not (lambda (spec) (eq (car spec) 'stack))
+                                       (rocq--goal-specs))
+         nil 'rocq-show-stack))
+      (rocq--insert-section
+       "Shelved" (cl-loop for i below (length shelf) collect `(shelf . ,i))
+       rocq-show-shelf 'rocq-show-shelf)
+      (rocq--insert-section
+       "Given up" (cl-loop for i below (length given_up)
+                           collect `(given-up . ,i))
+       rocq-show-shelf 'rocq-show-shelf))))
+
+(defun rocq--goto-selected-line ()
+  "Move point to the summary line of the selected goal, if any."
+  (goto-char (point-min))
+  (when rocq--selected-goal
+    (let ((pos (point-min)))
+      (while (and pos (not (equal (get-text-property pos 'rocq--goal)
+                                  rocq--selected-goal)))
+        (setq pos (next-single-property-change pos 'rocq--goal)))
+      (when pos
+        (goto-char pos)))))
+
+(defun rocq--refresh-goals (&optional display preserve)
+  "Redraw the goal buffer, which must be current, from the last response.
+Display it if DISPLAY is non-nil or `rocq-display-goals' is `always'.
+With PRESERVE, windows showing the focused view keep their position, so
+that automatic refreshes do not scroll."
+  (let ((inhibit-read-only t)
+        (positions (mapcar (lambda (w) (list w (window-start w)
+                                             (window-point w)))
+                           (get-buffer-window-list (current-buffer) nil t))))
+    (erase-buffer)
+    (setq header-line-format (rocq--goal-header))
+    (setq truncate-lines (eq rocq--view 'summary))
+    (if (eq rocq--view 'summary)
+        (progn
+          (rocq--insert-summary-view)
+          (rocq--goto-selected-line))
+      (rocq--insert-focused-view)
+      (goto-char (point-min)))
+    (dolist (position positions)
+      (pcase-let ((`(,window ,start ,point) position))
+        (when (window-live-p window)
+          (if (and preserve (eq rocq--view 'goal))
+              (progn
+                (set-window-start window (min start (point-max)))
+                (set-window-point window (min point (point-max))))
+            (set-window-point window (point))))))
+    (when (or display (eq rocq-display-goals 'always))
+      (rocq--display-goal-buffer))))
+
+;;;; Commands
+
+(defun rocq--return-to-source (buffer)
+  "Select the window of the Rocq buffer the goal BUFFER is about."
+  (when-let* ((source (buffer-local-value 'rocq--source buffer))
+              ((buffer-live-p source)))
+    (pop-to-buffer source '(display-buffer-reuse-window
+                            (inhibit-same-window . t)))))
+
+(defun rocq-switch-to-goals ()
+  "Show the summary of all goals and move to the goal buffer.
+There, \\<rocq-goal-mode-map>\\[rocq-select-goal] selects the goal on
+the line and \\[rocq-goals-quit] comes back.  From a Rocq buffer, the
+goals at point are requested first if needed."
+  (interactive)
+  (when (derived-mode-p 'rocq-mode)
+    (rocq-request))
+  (let ((buffer (rocq--goal-buffer)))
+    (with-current-buffer buffer
+      (setq rocq--view 'summary)
+      (rocq--refresh-goals))
+    (select-window (rocq--display-goal-buffer))
+    (rocq--goto-selected-line)))
+
+(defun rocq-goals-quit ()
+  "Go back to the Rocq buffer, leaving the goal buffer on the focused view."
+  (interactive)
+  (let ((buffer (rocq--goal-buffer)))
+    (with-current-buffer buffer
+      (unless (eq rocq--view 'goal)
+        (setq rocq--view 'goal)
+        (rocq--refresh-goals)))
+    (rocq--return-to-source buffer)))
+
+(defun rocq-toggle-goals-view ()
+  "Switch the goal buffer between the selected goal and the summary."
+  (interactive)
+  (with-current-buffer (rocq--goal-buffer)
+    (setq rocq--view (if (eq rocq--view 'summary) 'goal 'summary))
+    (rocq--refresh-goals t)))
+
+(defun rocq--select-and-show (spec)
+  "Select the goal SPEC, show it in full and go back to the Rocq buffer."
+  (let ((buffer (rocq--goal-buffer)))
+    (with-current-buffer buffer
+      (rocq--select spec)
+      (setq rocq--view 'goal)
+      (rocq--refresh-goals t))
+    (when (eq (window-buffer) buffer)
+      (rocq--return-to-source buffer))))
+
+(defun rocq-select-goal ()
+  "Select the goal on this line of the summary, or unfold the section."
+  (interactive)
+  (cond
+   ((get-text-property (point) 'rocq--goal)
+    (rocq--select-and-show (get-text-property (point) 'rocq--goal)))
+   ((get-text-property (point) 'rocq--toggle)
+    (let ((variable (get-text-property (point) 'rocq--toggle)))
+      (set variable (not (symbol-value variable)))
+      (rocq--refresh-goals)))
+   (t (user-error "No goal on this line"))))
+
+(defun rocq-select-goal-number ()
+  "Select the focused goal whose number is the key typed."
+  (interactive)
+  (let ((number (- last-command-event ?0))
+        (count (with-current-buffer (rocq--goal-buffer)
+                 (rocq--focused-count))))
+    (unless (<= 1 number count)
+      (user-error "No goal %d" number))
+    (rocq--select-and-show `(goal . ,(1- number)))))
+
+(defun rocq-next-goal (&optional arg)
+  "Select the next focused goal, ARG times, and display it.
+Cycles around at the end.  Negative ARG moves backward."
+  (interactive "p")
+  (setq arg (or arg 1))
+  (with-current-buffer (rocq--goal-buffer)
+    (let ((count (rocq--focused-count)))
+      (when (zerop count)
+        (user-error "No focused goals"))
+      (let ((current (pcase rocq--selected-goal
+                       (`(goal . ,i) i)
+                       (_ (if (> arg 0) -1 0)))))
+        (rocq--select `(goal . ,(mod (+ current arg) count)))
+        (rocq--refresh-goals t)))))
+
+(defun rocq-previous-goal (&optional arg)
+  "Select the previous focused goal, ARG times, and display it."
+  (interactive "p")
+  (rocq-next-goal (- (or arg 1))))
+
+(defun rocq-toggle-show-stack ()
+  "Toggle whether the goal summary lists unfocused goals."
+  (interactive)
+  (with-current-buffer (rocq--goal-buffer)
+    (setq rocq-show-stack (not rocq-show-stack))
+    (rocq--refresh-goals)))
+
+(defun rocq-toggle-show-shelf ()
+  "Toggle whether the goal summary lists shelved and given up goals."
+  (interactive)
+  (with-current-buffer (rocq--goal-buffer)
+    (setq rocq-show-shelf (not rocq-show-shelf))
+    (rocq--refresh-goals)))
+
+;;;; Requests
 
 (defun rocq--ensure-server ()
   "Return the server managing the current buffer, starting one if needed.
@@ -502,7 +885,7 @@ according to `rocq-display-goals'."
         :textDocument (eglot--TextDocumentIdentifier)
         :position (eglot--pos-to-lsp-position (point)))
        :success-fn
-       (eglot--lambda (textDocument range goals messages)
+       (eglot--lambda (textDocument range goals messages error)
          (with-current-buffer buf
            (when (equal state rocq--last-request-state)
              (unless rocq--last-request-overlay
@@ -519,135 +902,9 @@ according to `rocq-display-goals'."
                (delete-overlay rocq--last-request-overlay))
              (let ((display (or display rocq--display-pending)))
                (setq rocq--display-pending nil)
-               (with-current-buffer (rocq--status-buffer buf)
-                 (when (eq major-mode 'fundamental-mode)
-                   (rocq-status-mode))
-                 (setq rocq--goals goals)
-                 (setq rocq--messages messages)
-                 (setq rocq--selected-goal
-                       (eglot--dbind (goals stack shelf) goals
-                         (ignore stack shelf)
-                         (if (eql (length goals) 0)
-                             nil
-                           `(goal . 0))))
-                 (rocq-refresh-status display))))))))))
-
-(defun rocq--get-goal (spec)
-  "Get goal corresponding to SPEC."
-  (eglot--dbind (goals stack shelf) rocq--goals
-    (pcase spec
-      (`(goal . ,i) (aref goals i))
-      (`(stack . (,height ,position . ,num))
-       (let* ((slice (aref stack height))
-              (slice (elt slice position)))
-         (aref slice num)))
-      (`(shelf . ,i) (aref shelf i))
-      (_ nil))))
-
-(defun rocq-select-goal ()
-  "Select goal under point."
-  (interactive)
-  (if-let* ((goal (get-text-property (point) 'rocq--goal)))
-      (progn
-        (setq rocq--selected-goal goal)
-        (rocq-refresh-status t))
-    (message "No goal under point.")))
-
-(defun rocq--insert-goal-line (spec with-stack)
-  "Insert a line for goal given by SPEC at point.
-If WITH-STACK is non-nil, indent the line according to its depth in
-the goal stack."
-  (let* ((stack-len (eglot--dbind (stack) rocq--goals (length stack)))
-         (indent
-          (if with-stack
-              (pcase spec
-                (`(goal . ,_) stack-len)
-                (`(stack . (,height ,_ . ,_)) (- stack-len height 1))
-                (`(shelf . ,_) 0)
-                (_ nil))
-            0)))
-    (eglot--dbind (info ty) (rocq--get-goal spec)
-      (let ((p (point))
-            (name (when-let* ((name-array (plist-get info :name)))
-                    (or
-                     (when-let* ((dirpath (plist-get name-array :dirpath))
-                                 (name-array (plist-get name-array :basename)))
-                       (mapconcat (lambda (x) (elt x 1))
-                                  (nreverse (vconcat (vector name-array)
-                                                     (elt dirpath 1)))
-                                  "."))
-                     (elt name-array 1))))
-            (num (pcase spec (`(goal . ,i) (+ i 1)) (_ nil))))
-        (when (or name num)
-          (when num (insert (format "%d" num)))
-          (when name (insert "(?" name ")"))
-          (insert ": "))
-        (insert (propertize "G"
-                            'display
-                            `(left-fringe ,(if (equal spec rocq--selected-goal)
-                                               'filled-square
-                                             'hollow-square))))
-        (insert ty)
-        (indent-rigidly p (point) indent)
-        (insert ?\n)
-        (add-text-properties
-         p (point)
-         `(rocq--goal ,spec))))))
-
-(defun rocq-refresh-status (&optional display)
-  "Redraw the status buffer and the goal buffer from the last response.
-Display the goal buffer if DISPLAY is non-nil, which is the case
-interactively, or if `rocq-display-goals' is `always'; otherwise it is
-only updated in place, wherever it is already shown."
-  (interactive (list t))
-  (let ((inhibit-read-only t))
-    (let ((p (point))
-          (tot-goals 0))
-      (erase-buffer)
-      (eglot--dbind (goals stack shelf) rocq--goals
-        (cl-loop for i from (- (length stack) 1) downto 0
-                 do (cl-loop for j below (length (elt (aref stack i) 0))
-                             do (setq tot-goals (+ tot-goals 1))
-                             if rocq-show-stack
-                             do (rocq--insert-goal-line
-                                 `(stack . (,i 0 . ,j)) t))
-                 for pt = (point)
-                 do (cl-loop for j below (length (elt (aref stack i) 1))
-                             do (setq tot-goals (+ tot-goals 1))
-                             if rocq-show-stack
-                             do (rocq--insert-goal-line
-                                 `(stack . (,i 1 . ,j)) t))
-                 do (goto-char pt))
-        (cl-loop for i below (length goals)
-                 do (setq tot-goals (+ tot-goals 1))
-                 do (rocq--insert-goal-line `(goal . ,i) rocq-show-stack))
-        (goto-char (point-max))
-        (newline)
-        (when rocq-show-shelf
-          (insert "Shelf")
-          (newline)
-          (cl-loop for i below (length shelf)
-                   do (rocq--insert-goal-line `(shelf . ,i) nil))
-          (newline))
-        (insert (format "%d/%d Goals  %d Shelf  %d Messages\n"
-                        (length goals)
-                        tot-goals
-                        (length shelf)
-                        (length rocq--messages))))
-      (let ((goal (rocq--get-goal rocq--selected-goal))
-            (messages rocq--messages))
-        (with-current-buffer (get-buffer-create "*Rocq Goal*")
-          (when (eq major-mode 'fundamental-mode)
-            (rocq-goal-mode))
-          (erase-buffer)
-          (if goal
-              (rocq--insert-goal goal)
-            (mapc (eglot--lambda (text)
-                    (insert text "\n"))
-                  messages)))
-        (when (or display (eq rocq-display-goals 'always))
-          (rocq--display-goal-buffer)))
-      (goto-char p))))
+               (with-current-buffer (rocq--goal-buffer)
+                 (rocq--set-goals buf goals messages error)
+                 (rocq--refresh-goals display 'preserve))))))))))
 
 (defvar rocq--idle-goals-timer nil
   "Idle timer of the pending automatic goal request, or nil.")
@@ -954,7 +1211,9 @@ Outside comments, do nothing."
   :doc "Keymap for Rocq interaction."
   "C-c C-," #'rocq-request
   "C-c C-M-," #'rocq-go-to-last-request
-  "C-c C-c" #'rocq-switch-to-status
+  "C-c C-c" #'rocq-switch-to-goals
+  "C-c C-n" #'rocq-next-goal
+  "C-c C-p" #'rocq-previous-goal
   "C-c C-s" #'rocq-save-vo
   "C-c C-r" #'rocq-reload-vos
   "M-a" #'rocq-backward-sentence

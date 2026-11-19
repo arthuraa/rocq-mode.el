@@ -18,16 +18,25 @@ This package depends on [[https://github.com/joaotavora/eglot][Eglot]] for its L
 - Misc. =coq-lsp= commands like ~rocq-trim~, ~rocq-save-vo~ and ~rocq-reload-vos~.
 
 * Using =rocq-mode=
-Whenever =rocq-mode= requests the current proof status, it updates both a status
-buffer, which lists all open goals, and a goal display buffer, which shows a
-selected goal's full context.  The status buffer shows goal numbers (and their
-names if they have any), and any goal can be selected for display with =RET=.
-One can toggle unfocused goal display (ie. outside of the current bullet or
-braces) with ~s f~, and shelf display with =s s=.  Messages can be displayed
-using =m=.
+Whenever =rocq-mode= requests the proof status at point, it updates the goal
+buffer, =*Rocq Goal*=.  Its header line says which goal is shown and how many
+goals are open, focused or not, and the buffer shows the selected goal in full,
+with the error of the sentence at point if it failed and any messages below.
+=C-c C-n= and =C-c C-p= (~rocq-next-goal~, ~rocq-previous-goal~) cycle through
+the focused goals from the Rocq buffer.
+
+=C-c C-c= (~rocq-switch-to-goals~) switches the goal buffer to a summary with
+one line per goal and moves there.  In the summary, =n= and =p= move the
+selection,
+=RET= or a digit selects a goal, which shows it in full and returns to the Rocq
+buffer, and =q= returns without changing the selection.  Unfocused goals, those
+outside the current bullet or braces, are only counted unless =s f= lists them
+around the focused ones; shelved and given up goals likewise with =s s=.  =TAB=
+switches between the two views from inside the goal buffer.  The selection
+follows the same goal across refreshes while it exists.
 
 The goal buffer is only displayed by commands you invoke explicitly, such as
-~rocq-request~, ~rocq-switch-to-status~ or selecting a goal; automatic refreshes
+~rocq-request~, ~rocq-switch-to-goals~ or selecting a goal; automatic refreshes
 update it in place if it is visible and leave your windows alone otherwise.  Set
 ~rocq-display-goals~ to ~always~ to have every refresh display it.  Where it is
 displayed can be customized with ~display-buffer-alist~, for instance to keep it
@@ -134,7 +143,9 @@ and ~rocq-remove-workspace-folder~.
 |-------------+--------------------------------|
 | =C-c C-,=   | ~rocq-request~                 |
 | =C-c C-M-,= | ~rocq-go-to-last-goal-request~ |
-| =C-c C-c=   | ~rocq-switch-to-status~        |
+| =C-c C-c=   | ~rocq-switch-to-goals~         |
+| =C-c C-n=   | ~rocq-next-goal~               |
+| =C-c C-p=   | ~rocq-previous-goal~           |
 | =C-c C-s=   | ~rocq-save-vo~                 |
 | =C-c C-r=   | ~rocq-reload-vos~              |
 | =M-a=       | ~rocq-backward-sentence~       |

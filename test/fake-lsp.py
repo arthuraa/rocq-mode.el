@@ -51,12 +51,29 @@ while True:
         if method == "shutdown" and os.environ.get("FAKE_IGNORE_SHUTDOWN"):
             continue  # simulate a busy server that never answers
         if method == "proof/goals":
+            # The answer depends on the line asked about, so that tests
+            # can see goals come and go: lines 0-2 have two focused
+            # goals, line 3 one with an error, line 4 none but an
+            # unfocused one, and later lines are outside a proof.
             td = msg["params"]["textDocument"]
+            line = msg["params"]["position"]["line"]
+            first = {"info": {"evar": ["Ser_Evar", 1], "name": None},
+                     "hyps": [{"names": ["n"], "ty": "nat"}], "ty": "n = n"}
+            second = {"info": {"evar": ["Ser_Evar", 2], "name": "second"},
+                      "hyps": [], "ty": "True /\\\n  True"}
+            unfocused = {"info": {"evar": ["Ser_Evar", 3], "name": None},
+                         "hyps": [], "ty": "False"}
+            shelved = {"info": {"evar": ["Ser_Evar", 4], "name": None},
+                       "hyps": [], "ty": "Shelved"}
+            goals = {"goals": [first, second] if line < 3 else [second] if line == 3 else [],
+                     "stack": [[[], [unfocused]]], "shelf": [shelved], "given_up": []}
             result = {"textDocument": {"uri": td["uri"], "version": 0},
                       "position": msg["params"]["position"],
-                      "goals": {"goals": [{"hyps": [{"names": ["n"], "ty": "nat"}], "ty": "n = n"}],
-                                "stack": [], "shelf": [], "given_up": []},
-                      "messages": [], "range": None}
+                      "messages": [{"level": 2, "text": "a warning"}], "range": None}
+            if line < 5:
+                result["goals"] = goals
+            if line == 3:
+                result["error"] = "an error"
         if method == "initialize":
             result = {"capabilities": {"workspace": {"workspaceFolders": {"supported": True, "changeNotifications": True}}},
                       "serverInfo": {"name": "fake"}}

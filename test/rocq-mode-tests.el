@@ -116,13 +116,34 @@ Return the value of PREDICATE."
   (rocq-workspace-folders (eglot-current-server)))
 
 (defun rocq-test-goals-p ()
-  "Whether the status buffer of the current buffer holds goals."
-  (with-current-buffer (rocq--status-buffer (current-buffer)) rocq--goals))
+  "Whether the goal buffer holds a response."
+  (when-let* ((buffer (get-buffer "*Rocq Goal*")))
+    (buffer-local-value 'rocq--source buffer)))
 
 (defun rocq-test-forget-goals ()
-  "Forget the goals of the status buffer, to wait for new ones."
-  (with-current-buffer (rocq--status-buffer (current-buffer))
-    (setq rocq--goals nil)))
+  "Forget the response in the goal buffer, to wait for a new one."
+  (when-let* ((buffer (get-buffer "*Rocq Goal*")))
+    (with-current-buffer buffer
+      (setq rocq--source nil))))
+
+(defun rocq-test-header ()
+  "Return the header line of the goal buffer, without text properties."
+  (substring-no-properties
+   (buffer-local-value 'header-line-format (get-buffer "*Rocq Goal*"))))
+
+(defun rocq-test-goal-text ()
+  "Return the text of the goal buffer."
+  (with-current-buffer "*Rocq Goal*"
+    (buffer-substring-no-properties (point-min) (point-max))))
+
+(defun rocq-test-request-at-line (line)
+  "Request the goals at the end of LINE, counted from 0, and wait."
+  (goto-char (point-min))
+  (forward-line line)
+  (end-of-line)
+  (rocq-test-forget-goals)
+  (call-interactively #'rocq-request)
+  (should (rocq-test-wait #'rocq-test-goals-p)))
 
 ;;; Project roots
 
@@ -340,13 +361,18 @@ its own response instead."
       (rocq-request)
       (should (rocq-test-wait #'rocq-test-goals-p))
       (should-not displayed)
-      ;; The status buffer commands display what they act on.
-      (rocq-switch-to-status)
-      (should (eq major-mode 'rocq-status-mode))
-      (should (equal (reverse displayed) (list (buffer-name) "*Rocq Goal*")))
-      (setq displayed nil)
-      (rocq-select-goal)
+      ;; The goal buffer commands display what they act on.
+      (rocq-switch-to-goals)
+      (should (eq major-mode 'rocq-goal-mode))
       (should (equal displayed '("*Rocq Goal*")))
+      (setq displayed nil)
+      (rocq-goals-quit)
+      (should (equal (buffer-name) "A.v"))
+      (should-not (member "*Rocq Goal*" displayed))
+      (setq displayed nil)
+      (rocq-toggle-goals-view)
+      (should (equal displayed '("*Rocq Goal*")))
+      (rocq-toggle-goals-view)
       ;; With `always', automatic refreshes display too.
       (let ((rocq-display-goals 'always))
         (switch-to-buffer "A.v")
@@ -357,6 +383,88 @@ its own response instead."
         (should (rocq-test-wait #'rocq-test-goals-p))
         (should (equal displayed '("*Rocq Goal*"))))
       (should (= 4 (rocq-test-method-count "proof/goals"))))))
+
+(ert-deftest rocq-test-goal-buffer ()
+  "The goal buffer: header, views, cycling, selection and empty states.
+The fake server answers according to the line asked about, see
+`fake-lsp.py'."
+  (skip-unless (rocq-test--server-tests-possible-p))
+  (rocq-test-with-project
+      `(("A.v" . ,(concat "Lemma a : forall n, n = n.\nProof.\n  intros n.\n"
+                          "  exact I.\n  idtac.\n(* after *)\n")))
+    (rocq-test-with-display-log displayed
+      (rocq-test-open "A.v")
+      (rocq-test-request-at-line 2)
+      (should (equal (rocq-test-header)
+                     (concat " Goal 1/2  ·  1 unfocused  ·  1 shelved"
+                             "  ·  1 message   TAB: all goals")))
+      (should (equal (rocq-test-goal-text)
+                     "n = n\n──────\nn : nat\n\nMessages\na warning\n"))
+      ;; Cycling from the Rocq buffer wraps around.
+      (rocq-next-goal)
+      (should (string-prefix-p " Goal 2/2 (second)" (rocq-test-header)))
+      (should (string-prefix-p "True /\\\n  True\n" (rocq-test-goal-text)))
+      (rocq-next-goal)
+      (should (string-prefix-p " Goal 1/2 " (rocq-test-header)))
+      (rocq-previous-goal)
+      (should (string-prefix-p " Goal 2/2" (rocq-test-header)))
+      ;; The selection follows the goal across refreshes.
+      (beginning-of-line)
+      (rocq-test-forget-goals)
+      (rocq-request)
+      (should (rocq-test-wait #'rocq-test-goals-p))
+      (should (string-prefix-p " Goal 2/2" (rocq-test-header)))
+      ;; The summary, entered from the Rocq buffer.
+      (setq displayed nil)
+      (rocq-switch-to-goals)
+      (should (eq major-mode 'rocq-goal-mode))
+      (should (equal displayed '("*Rocq Goal*")))
+      (should (string-prefix-p " 2 goals  ·  1 unfocused" (rocq-test-header)))
+      (should (equal (rocq-test-goal-text)
+                     (concat "  1: n = n\n▶ 2(second): True /\\ True\n\n"
+                             "Unfocused (1)  RET to show\n\n"
+                             "Shelved (1)  RET to show\n")))
+      (should (looking-at "▶ 2"))
+      ;; Selecting a line shows the goal and returns to the Rocq buffer.
+      (goto-char (point-min))
+      (rocq-select-goal)
+      (should (equal (buffer-name) "A.v"))
+      (should (string-prefix-p " Goal 1/2 " (rocq-test-header)))
+      (should (eq (buffer-local-value 'rocq--view (get-buffer "*Rocq Goal*"))
+                  'goal))
+      ;; So does a digit; `q' returns without selecting.
+      (rocq-switch-to-goals)
+      (let ((last-command-event ?2))
+        (rocq-select-goal-number))
+      (should (equal (buffer-name) "A.v"))
+      (should (string-prefix-p " Goal 2/2" (rocq-test-header)))
+      (rocq-switch-to-goals)
+      (rocq-next-goal)
+      (should (looking-at "▶ 1"))
+      (search-forward "Unfocused")
+      (rocq-select-goal)
+      (should (string-match-p "^  False$" (rocq-test-goal-text)))
+      (rocq-goals-quit)
+      (should (equal (buffer-name) "A.v"))
+      (should (string-prefix-p " Goal 1/2" (rocq-test-header)))
+      ;; A failing sentence shows its error; a vanished goal falls back
+      ;; to the first one.
+      (rocq-test-request-at-line 3)
+      (should (equal (rocq-test-header)
+                     (concat " Goal 1/1 (second)  ·  1 unfocused  ·  1 shelved"
+                             "  ·  error  ·  1 message   TAB: all goals")))
+      (should (string-prefix-p "an error\n\nTrue" (rocq-test-goal-text)))
+      ;; Empty states.
+      (rocq-test-request-at-line 4)
+      (should (string-prefix-p " No focused goals  ·  1 unfocused"
+                               (rocq-test-header)))
+      (should (string-prefix-p
+               "This subproof is complete, but there is 1 unfocused goal.\n"
+               (rocq-test-goal-text)))
+      (should-error (rocq-next-goal))
+      (rocq-test-request-at-line 5)
+      (should (string-prefix-p " Not in a proof" (rocq-test-header)))
+      (should (string-prefix-p "Not in a proof.\n" (rocq-test-goal-text))))))
 
 ;;; Indentation
 
