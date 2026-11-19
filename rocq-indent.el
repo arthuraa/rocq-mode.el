@@ -19,7 +19,13 @@
 ;; A sentence ends at a `.' followed by whitespace, at a bullet, or at a
 ;; proof block `{ ... }'.  Bullets and braces are recognised as such
 ;; only at the start of a sentence, so operators and record notations
-;; are not mistaken for them.
+;; are not mistaken for them.  The `..' of recursive notations is not a
+;; terminator, while `...' is.
+;;
+;; The same scanner drives `rocq-forward-sentence' and
+;; `rocq-backward-sentence'.  For motion, as in Proof General, a bullet
+;; and each brace of a proof block are sentences of their own, and
+;; comments are skipped.
 
 ;;; Code:
 
@@ -132,7 +138,9 @@ brace sits at the start of a sentence."
   (pcase-let ((`(,string ,start ,end) token))
     (cond
      ((string-match-p "\\`\\.+\\'" string)
-      (and (rocq-indent--space-after-p end) 'dot))
+      (and (not (equal string ".."))
+           (rocq-indent--space-after-p end)
+           'dot))
      ((string-match-p "\\`\\(?:-+\\|\\++\\|\\*+\\)\\'" string)
       (and (rocq-indent--space-after-p end)
            (rocq-indent--sentence-start-p start limit)
@@ -197,6 +205,10 @@ found before LIMIT."
 
 ;;; Columns
 
+(defun rocq-indent--opener (pos)
+  "Return the innermost unclosed bracket before POS, without moving point."
+  (save-excursion (nth 1 (syntax-ppss pos))))
+
 (defun rocq-indent--column (pos)
   "Return the column of POS."
   (save-excursion (goto-char pos) (current-column)))
@@ -234,16 +246,35 @@ found before LIMIT."
 
 (defun rocq-indent--proof-block-p (opener)
   "Whether the brace at OPENER opens a proof block rather than a term.
-A proof block starts a sentence, at top level or inside another proof
-block.  Braces glued together, as in the `{{{ P }}}' notation, never
-open one."
+A proof block starts a sentence, possibly after a goal selector, at top
+level or inside another proof block.  Braces glued together, as in the
+`{{{ P }}}' notation, and the `{|' of records never open one."
   (and (eq (char-after opener) ?{)
        (not (eq (char-before opener) ?{))
-       (not (eq (char-after (1+ opener)) ?{))
-       (let ((outer (nth 1 (syntax-ppss opener))))
+       (not (memq (char-after (1+ opener)) '(?{ ?|)))
+       (let* ((outer (rocq-indent--opener opener))
+              (limit (rocq-indent--group-start-or-min outer)))
          (and (or (null outer) (rocq-indent--proof-block-p outer))
               (rocq-indent--sentence-start-p
-               opener (rocq-indent--group-start-or-min outer))))))
+               (rocq-indent--selector-start opener limit) limit)))))
+
+(defun rocq-indent--selector-start (pos limit)
+  "Return the start of the goal selector before POS, or POS if none.
+A selector is a number, `all' or a bracketed name followed by a colon,
+as in `2: {'.  LIMIT bounds the scan."
+  (save-excursion
+    (goto-char pos)
+    (let ((colon (rocq-indent--backward-token limit)))
+      (if (not (equal (car colon) ":"))
+          pos
+        (let ((selector (rocq-indent--backward-token limit)))
+          (if (and selector
+                   (or (equal (car selector) "all")
+                       (string-match-p "\\`[0-9]+\\'" (car selector))
+                       (and (equal (car selector) "()")
+                            (eq (char-after (nth 1 selector)) ?\[))))
+              (nth 1 selector)
+            pos))))))
 
 (defun rocq-indent--group-start-or-min (opener)
   "Return the start of the group opened at OPENER, or of the buffer."
@@ -259,7 +290,7 @@ open one."
   "Column from which constructs at POS are indented.
 That is the hanging column of the group POS is in when it sits on the
 opener's line, and the indentation of its line otherwise."
-  (let* ((opener (nth 1 (syntax-ppss pos)))
+  (let* ((opener (rocq-indent--opener pos))
          (text (and opener (rocq-indent--group-text opener))))
     (if (and text
              (= (rocq-indent--indentation-line text)
@@ -403,7 +434,8 @@ bracket around TOK and LIMIT the start of its group."
          (pcase kind
            ('nil (rocq-indent--group-base opener))
            ('bullet (+ (rocq-indent--column start) (- end start) 1))
-           ('brace (rocq-indent--column start))
+           ('brace (rocq-indent--column
+                    (rocq-indent--selector-start start limit)))
            ('dot (rocq-indent--sentence-base start limit)))))
     (save-excursion
       (goto-char tok)
@@ -536,6 +568,96 @@ See `rocq-indent-offset', `rocq-indent-match-offset' and
           ((<= (current-column) (current-indentation))
            (indent-line-to indent))
           (t (save-excursion (indent-line-to indent))))))
+
+;;; Sentence motion
+
+(defun rocq-indent--sentence-context (pos)
+  "Return (LEVEL . OUTSIDE) for POS.
+LEVEL is the proof block enclosing POS, or nil at top level.  OUTSIDE is
+POS moved out of the string, comment and brackets around it that are
+part of a sentence, so that a backward scan from there sees whole
+tokens."
+  (let* ((ppss (save-excursion (syntax-ppss pos)))
+         (outside (or (nth 8 ppss) pos))
+         (opener (nth 1 ppss)))
+    (while (and opener (not (rocq-indent--proof-block-p opener)))
+      (setq outside opener
+            opener (rocq-indent--opener opener)))
+    (cons opener outside)))
+
+(defun rocq-indent--forward-terminator (level)
+  "Move past the next sentence terminator at LEVEL, a proof block or nil.
+Return the position after it, or go to the end of the buffer and
+return nil if there is none."
+  (let ((limit (rocq-indent--group-start-or-min level))
+        found)
+    (while (and (not found)
+                (re-search-forward "\\.+\\|[-+*]+\\|[{}]" nil t))
+      (let* ((start (match-beginning 0))
+             (end (match-end 0))
+             (ppss (save-excursion (syntax-ppss start))))
+        (when (and (not (nth 8 ppss))
+                   (eq (nth 1 ppss) level)
+                   (pcase (char-after start)
+                     (?. (and (/= (- end start) 2)
+                              (rocq-indent--space-after-p end)))
+                     (?{ (rocq-indent--proof-block-p start))
+                     (?} level)
+                     (_ (and (rocq-indent--space-after-p end)
+                             (rocq-indent--sentence-start-p start limit)))))
+          (setq found end))))
+    (goto-char (or found (point-max)))
+    found))
+
+(defun rocq-indent--backward-sentence ()
+  "Move to the start of the sentence at point, or of the previous one.
+Point is at the start of a sentence when only whitespace and comments
+separate it from the previous terminator; it then moves to the start of
+the previous sentence."
+  (pcase-let* ((`(,level . ,outside)
+                (rocq-indent--sentence-context (point)))
+               (limit (rocq-indent--group-start-or-min level)))
+    (goto-char outside)
+    (pcase-let ((`(,kind ,start ,end ,first)
+                 (rocq-indent--previous-sentence-end limit)))
+      (cond
+       (first (goto-char first))
+       ;; The previous token is a whole proof block: its closer is the
+       ;; previous sentence.
+       ((eq kind 'brace) (goto-char (1- end)))
+       (kind (goto-char (rocq-indent--sentence-start start limit)))
+       ;; At the start of a proof block, the previous sentence is the
+       ;; brace opening it, with its goal selector if any.
+       (level
+        (goto-char (rocq-indent--selector-start
+                    level (rocq-indent--group-start-or-min
+                           (car (rocq-indent--sentence-context level))))))
+       (t (goto-char limit))))))
+
+(defun rocq-forward-sentence (&optional arg)
+  "Move forward to the end of the sentence, ARG times.
+A sentence ends after its terminating period, and a bullet or a brace
+of a proof block is a sentence of its own.  Comments are skipped.  With
+a negative ARG, move backward to the start of the sentence instead, see
+`rocq-backward-sentence'.  Return point."
+  (interactive "^p")
+  (setq arg (or arg 1))
+  (while (> arg 0)
+    (rocq-indent--forward-terminator
+     (car (rocq-indent--sentence-context (point))))
+    (setq arg (1- arg)))
+  (while (< arg 0)
+    (rocq-indent--backward-sentence)
+    (setq arg (1+ arg)))
+  (point))
+
+(defun rocq-backward-sentence (&optional arg)
+  "Move backward to the start of the sentence, ARG times.
+When point is already at the start of a sentence, move to the start of
+the previous one.  With a negative ARG, move forward instead, see
+`rocq-forward-sentence'.  Return point."
+  (interactive "^p")
+  (rocq-forward-sentence (- (or arg 1))))
 
 (provide 'rocq-indent)
 ;;; rocq-indent.el ends here

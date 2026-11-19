@@ -14,6 +14,7 @@ This package depends on [[https://github.com/joaotavora/eglot][Eglot]] for its L
 - Automatic addition of folders containing a ~_RocqProject~ or ~_CoqProject~ file to the workspace;
 - Instant switching between on-demand and continuous mode;
 - Indentation of proofs, bullets, =match= branches and terms;
+- Motion by sentence with =M-a= and =M-e=;
 - Misc. =coq-lsp= commands like ~rocq-trim~, ~rocq-save-vo~ and ~rocq-reload-vos~.
 
 * Using =rocq-mode=
@@ -51,6 +52,15 @@ Four options control the layout:
 - ~rocq-indent-sections~ (default ~nil~) indents the contents of sections and
   modules.
 Typing =|= or =}= at the start of a line reindents it.
+
+* Sentences
+=M-e= (~rocq-forward-sentence~) moves to the end of the current sentence and
+=M-a= (~rocq-backward-sentence~) to its start, or to the previous one when
+already there.  Both take a count.  A sentence ends at a period followed by
+whitespace; as in Proof General, a bullet and each brace of a proof block are
+sentences of their own, and comments are skipped.  The =..= of recursive
+notations is not a terminator.  On Emacs 30 and later, =M-k=
+(~kill-sentence~) and the other sentence commands follow the same rules.
 
 * Configuration
 The recommended configuration is via ~use-package~ (see [[https://www.gnu.org/software/emacs/manual/html_mono/use-package.html][use-package's
@@ -127,12 +137,14 @@ and ~rocq-remove-workspace-folder~.
 | =C-c C-c=   | ~rocq-switch-to-status~        |
 | =C-c C-s=   | ~rocq-save-vo~                 |
 | =C-c C-r=   | ~rocq-reload-vos~              |
+| =M-a=       | ~rocq-backward-sentence~       |
+| =M-e=       | ~rocq-forward-sentence~        |
 
 * Development
 =make compile= byte-compiles the package with warnings treated as errors, and
 =make test= runs the ERT suite in =test/=.  The suite exercises project root
-registration, server start and shutdown, goal display, indentation and comment
-filling.  The server tests run against =test/fake-lsp.py=, a small LSP server
+registration, server start and shutdown, goal display, indentation, sentence
+motion and comment filling.  The server tests run against =test/fake-lsp.py=, a small LSP server
 standing in for =coq-lsp=, and are skipped when =python3= or =git= is not
 available.
 

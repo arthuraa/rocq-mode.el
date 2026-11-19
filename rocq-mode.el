@@ -83,6 +83,7 @@
 (defvar rocq-mode--processing-overlays)
 (defvar rocq--last-request-overlay)
 (defvar rocq--last-request-state)
+(defvar forward-sentence-function)
 
 (cl-defgeneric (setf rocq-timing-data) (value server)
   ""
@@ -922,7 +923,9 @@ Outside comments, do nothing."
   "C-c C-M-," #'rocq-go-to-last-request
   "C-c C-c" #'rocq-switch-to-status
   "C-c C-s" #'rocq-save-vo
-  "C-c C-r" #'rocq-reload-vos)
+  "C-c C-r" #'rocq-reload-vos
+  "M-a" #'rocq-backward-sentence
+  "M-e" #'rocq-forward-sentence)
 
 ;;;###autoload
 (with-eval-after-load 'eglot
@@ -971,6 +974,9 @@ Key bindings:
               indent-tabs-mode nil
               parse-sexp-ignore-comments t
               electric-indent-chars (append '(?| ?}) electric-indent-chars))
+  ;; Emacs 30 lets sentence commands such as `kill-sentence' use this.
+  (when (boundp 'forward-sentence-function)
+    (setq-local forward-sentence-function #'rocq-forward-sentence))
   (rocq--setup-font-lock))
 
 (define-minor-mode rocq-follow-viewport-mode

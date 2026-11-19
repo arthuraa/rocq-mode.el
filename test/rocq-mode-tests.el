@@ -9,8 +9,8 @@
 ;;
 ;; The server tests drive the mode against `fake-lsp.py', a small LSP
 ;; server that logs what it receives, and need python3 and git; they are
-;; skipped when either is missing.  The indentation and filling tests
-;; need nothing.
+;; skipped when either is missing.  The indentation, sentence motion
+;; and filling tests need nothing.
 
 ;;; Code:
 
@@ -378,6 +378,129 @@ Unless KEEP is non-nil, indentation outside comments is removed first."
     (rocq-indent-line)
     (should (looking-at " n\\.$"))
     (should (equal (buffer-string) "Proof.\n  intros n.\n"))))
+
+;;; Sentence motion
+
+(defconst rocq-test-sentences-text
+  (concat "Lemma a : forall n : nat, n = n. (* about n. *)\n"
+          "Proof.\n"
+          "  intros n; destruct n as [|m].\n"
+          "  - reflexivity.\n"
+          "  - { rewrite (Nat.add_0_r m)... }\n"
+          "  all: { exact (f_equal S eq_refl). }\n"
+          "Qed.\n"
+          "Notation \"[ x ; .. ; y ]\" := (cons x .. (cons y nil) ..).\n"
+          "Definition s := \"a. b\".\n"
+          "Definition r := {| f := 1; g := 2 |}.\n"
+          "Lemma b : {{{ True }}} e {{{ RET #(); True }}}.\n"
+          "Proof. { { exact I. } } Qed.\n"
+          "Check 1.\n")
+  "Code exercising sentence motion.")
+
+(defun rocq-test-sentences ()
+  "Return the sentences of the current buffer, stepping forward.
+Check on the way that `rocq-backward-sentence' finds the start of each
+sentence from its end and from just inside it, and that stepping
+backward from the end of the buffer visits the same starts."
+  (goto-char (point-min))
+  (let (sentences starts)
+    (while (not (save-excursion (forward-comment (buffer-size)) (eobp)))
+      (let* ((prev (point))
+             (end (progn (rocq-forward-sentence) (point)))
+             (start (save-excursion (rocq-backward-sentence) (point))))
+        (should (> end prev))
+        (should (<= prev start))
+        (should (= start (save-excursion
+                           (goto-char (min end (1+ start)))
+                           (rocq-backward-sentence)
+                           (point))))
+        (push start starts)
+        (push (buffer-substring-no-properties start end) sentences)))
+    (goto-char (point-max))
+    (let (chain prev)
+      (while (progn (setq prev (point))
+                    (rocq-backward-sentence)
+                    (< (point) prev))
+        (push (point) chain))
+      ;; Before the first sentence, point lands at the start of the buffer.
+      (when (and chain starts (< (car chain) (car (last starts))))
+        (pop chain))
+      (should (equal chain (reverse starts))))
+    (nreverse sentences)))
+
+(ert-deftest rocq-test-sentence-list ()
+  "Sentence motion splits code like Proof General does."
+  (with-temp-buffer
+    (insert rocq-test-sentences-text)
+    (rocq-mode)
+    (should (equal (rocq-test-sentences)
+                   '("Lemma a : forall n : nat, n = n." "Proof."
+                     "intros n; destruct n as [|m]." "-" "reflexivity."
+                     "-" "{" "rewrite (Nat.add_0_r m)..." "}" "all: {"
+                     "exact (f_equal S eq_refl)." "}" "Qed."
+                     "Notation \"[ x ; .. ; y ]\" := \
+(cons x .. (cons y nil) ..)."
+                     "Definition s := \"a. b\"."
+                     "Definition r := {| f := 1; g := 2 |}."
+                     "Lemma b : {{{ True }}} e {{{ RET #(); True }}}."
+                     "Proof." "{" "{" "exact I." "}" "}" "Qed." "Check 1.")))))
+
+(ert-deftest rocq-test-sentence-from-inside ()
+  "Motion from inside comments, strings, brackets and blocks."
+  (with-temp-buffer
+    (insert rocq-test-sentences-text)
+    (rocq-mode)
+    (cl-flet ((from (text)
+                (goto-char (point-min))
+                (search-forward text))
+              (forward-lands-on (regexp)
+                (rocq-forward-sentence)
+                (should (looking-back regexp (line-beginning-position))))
+              (backward-lands-on (regexp)
+                (rocq-backward-sentence)
+                (should (looking-at regexp))))
+      ;; Comments between sentences are skipped.
+      (from "about") (forward-lands-on "Proof\\.")
+      (from "about") (backward-lands-on "Lemma a")
+      ;; Periods in strings and brackets do not count.
+      (from "a. ") (forward-lands-on "\"a\\. b\"\\.")
+      (from "a. ") (backward-lands-on "Definition s")
+      (from "cons y") (forward-lands-on "\\.\\.)\\.")
+      (from "cons y") (backward-lands-on "Notation")
+      ;; Each brace of a proof block is a sentence; glued braces are not.
+      (from "m)... }") (backward-lands-on "}")
+      (from "m)... }") (forward-lands-on "all: {")
+      (from "True }}} e") (forward-lands-on "}}}\\.")
+      (from "True }}} e") (backward-lands-on "Lemma b")
+      ;; Counts, including negative ones.
+      (from "all: ")
+      (rocq-forward-sentence 3)
+      (should (looking-back "eq_refl)\\. }" (line-beginning-position)))
+      (rocq-forward-sentence -2)
+      (should (looking-at "exact (f_equal"))
+      (rocq-backward-sentence -1)
+      (should (looking-back "eq_refl)\\." (line-beginning-position))))))
+
+(ert-deftest rocq-test-sentence-corpus ()
+  "Forward and backward motion agree on the indentation corpus."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "indent.v" rocq-test-directory))
+    (rocq-mode)
+    (dolist (sentence (rocq-test-sentences))
+      (should (string-match-p "\\`[^ \t\n]" sentence))
+      (should (string-match-p "\\(?:\\.\\|[-+*{}]\\)\\'" sentence)))))
+
+(ert-deftest rocq-test-sentence-commands ()
+  "The standard sentence commands follow Rocq sentences on Emacs 30."
+  (skip-unless (boundp 'forward-sentence-function))
+  (with-temp-buffer
+    (insert rocq-test-sentences-text)
+    (rocq-mode)
+    (goto-char (point-min))
+    (forward-sentence)
+    (should (looking-back "n = n\\." (line-beginning-position)))
+    (kill-sentence)
+    (should (looking-at "\n  intros n;"))))
 
 ;;; Filling
 
