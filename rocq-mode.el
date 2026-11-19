@@ -285,6 +285,13 @@ same state and to ignore responses that are no longer current.")
 (defvar-local rocq--last-request-overlay nil
   "Overlay highlighting the sentence of the last goal request, or nil.")
 
+(defvar-local rocq--display-pending nil
+  "Whether a display of the goal buffer was asked for and is still due.
+Set by `rocq-request' when called with DISPLAY and cleared once goals
+are shown, so that the request that starts the server with
+\\[rocq-request] still brings the goal buffer up when an automatic
+request supersedes it before its response arrives.")
+
 ;; The following variables are local to the status buffer.
 
 (defvar-local rocq--goals nil
@@ -397,8 +404,12 @@ Display the status and goal buffers if needed."
     (rocq--display-goal-buffer)))
 
 (defun rocq--goal-request-state ()
-  "Builds a goal request state."
-  (list (buffer-modified-tick) (point)))
+  "Return the state of the buffer that the goals at point depend on.
+That is the text, through `buffer-chars-modified-tick', and point.
+Text property changes do not count: Eglot refontifies the buffer right
+after connecting, and an automatic request made for that would
+supersede the one that started the server."
+  (list (buffer-chars-modified-tick) (point)))
 
 (defface rocq-goal-face
   `()
@@ -469,16 +480,20 @@ when this returns.  Signal an error if that fails."
 If no coq-lsp server manages the buffer, start one first, which makes
 this the command to turn coq-lsp on when `rocq-mode-start-server' is nil
 or after `eglot-shutdown'.  Interactively, or if DISPLAY is non-nil,
-also display the goal buffer once the status is known.  Otherwise, the
-goal buffer is only displayed according to `rocq-display-goals'."
+also display the goal buffer once the status is known, even if a later
+request answers first.  Otherwise, the goal buffer is only displayed
+according to `rocq-display-goals'."
   (interactive (list t))
   (let ((serv (rocq--ensure-server))
         (state (rocq--goal-request-state))
         (buf (current-buffer)))
+    (when display
+      (setq rocq--display-pending t))
     (if (equal state rocq--last-request-state)
         ;; Nothing changed since the last request, so its result is
-        ;; already in the goal buffer.
-        (when display (rocq--display-goal-buffer))
+        ;; already in the goal buffer, unless it has not arrived yet.
+        (when (and display (rocq--display-goal-buffer))
+          (setq rocq--display-pending nil))
       (setq rocq--last-request-state state)
       (jsonrpc-async-request
        serv
@@ -502,18 +517,20 @@ goal buffer is only displayed according to `rocq-display-goals'."
                                    (eglot--lsp-position-to-point start)
                                    (eglot--lsp-position-to-point end))))
                (delete-overlay rocq--last-request-overlay))
-             (with-current-buffer (rocq--status-buffer buf)
-               (when (eq major-mode 'fundamental-mode)
-                 (rocq-status-mode))
-               (setq rocq--goals goals)
-               (setq rocq--messages messages)
-               (setq rocq--selected-goal
-                     (eglot--dbind (goals stack shelf) goals
-                       (ignore stack shelf)
-                       (if (eql (length goals) 0)
-                           nil
-                         `(goal . 0))))
-               (rocq-refresh-status display)))))))))
+             (let ((display (or display rocq--display-pending)))
+               (setq rocq--display-pending nil)
+               (with-current-buffer (rocq--status-buffer buf)
+                 (when (eq major-mode 'fundamental-mode)
+                   (rocq-status-mode))
+                 (setq rocq--goals goals)
+                 (setq rocq--messages messages)
+                 (setq rocq--selected-goal
+                       (eglot--dbind (goals stack shelf) goals
+                         (ignore stack shelf)
+                         (if (eql (length goals) 0)
+                             nil
+                           `(goal . 0))))
+                 (rocq-refresh-status display))))))))))
 
 (defun rocq--get-goal (spec)
   "Get goal corresponding to SPEC."

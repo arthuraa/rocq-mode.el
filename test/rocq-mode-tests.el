@@ -263,15 +263,49 @@ Return the value of PREDICATE."
         (call-interactively #'rocq-request)
         (should (equal displayed '("*Rocq Goal*")))
         (should (= 1 (rocq-test-method-count "proof/goals")))
-        ;; After a shutdown, a prefix argument must not reach `eglot'.
+        ;; After a shutdown, a prefix argument must not reach `eglot',
+        ;; and the goal buffer comes up again.
         (eglot-shutdown (eglot-current-server) nil 1)
         (should-not (eglot-managed-p))
         (rocq-test-forget-goals)
+        (setq displayed nil)
         (let ((current-prefix-arg '(4)))
           (call-interactively #'rocq-request))
         (should (cl-typep (eglot-current-server) 'rocq--lsp-server))
         (should (rocq-test-wait #'rocq-test-goals-p))
-        (should (= 2 (rocq-test-method-count "proof/goals")))))))
+        (should (= 2 (rocq-test-method-count "proof/goals")))
+        (should (member "*Rocq Goal*" displayed))))))
+
+(ert-deftest rocq-test-request-display-survives ()
+  "A request made to display goals is not lost before its response.
+Fontification, which Eglot triggers right after connecting, must not
+make it stale, and an automatic request superseding it must display
+its own response instead."
+  (skip-unless (rocq-test--server-tests-possible-p))
+  (rocq-test-with-project '(("A.v" . "Lemma a : forall n, n = n.\nProof.\n"))
+    (rocq-test-with-display-log displayed
+      (rocq-test-open "A.v")
+      (should (eglot-managed-p))
+      (goto-char (point-max))
+      (call-interactively #'rocq-request)
+      (with-silent-modifications
+        (put-text-property (point-min) (1+ (point-min)) 'face 'bold))
+      ;; An automatic request for the same text sends nothing.
+      (rocq-request)
+      (should (rocq-test-wait #'rocq-test-goals-p))
+      (should (= 1 (rocq-test-method-count "proof/goals")))
+      (should (member "*Rocq Goal*" displayed))
+      ;; The text changes before the response arrives, and an automatic
+      ;; request is made for the new state.
+      (setq displayed nil)
+      (rocq-test-forget-goals)
+      (insert "\n")
+      (call-interactively #'rocq-request)
+      (insert "\n")
+      (rocq-request)
+      (should (rocq-test-wait #'rocq-test-goals-p))
+      (should (= 3 (rocq-test-method-count "proof/goals")))
+      (should (member "*Rocq Goal*" displayed)))))
 
 ;;; Goal display
 
