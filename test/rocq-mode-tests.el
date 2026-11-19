@@ -216,7 +216,7 @@ Return the value of PREDICATE."
 ;;; Server lifecycle
 
 (ert-deftest rocq-test-shutdown-clears-state ()
-  "Shutting the server down removes overlays and silences the timers."
+  "Shutting the server down removes overlays, goals and silences timers."
   (skip-unless (rocq-test--server-tests-possible-p))
   (rocq-test-with-project '(("_CoqProject" . "-Q . Top\n")
                             ("A.v" . "Definition a := 1.\n"))
@@ -224,9 +224,16 @@ Return the value of PREDICATE."
     (should (rocq-test-wait (lambda () rocq-mode--processing-overlays)))
     (rocq-auto-goals-at-point-mode 1)
     (rocq-follow-viewport-mode 1)
+    (call-interactively #'rocq-request)
+    (should (rocq-test-wait #'rocq-test-goals-p))
+    (should (get-buffer-window "*Rocq Goal*"))
     (eglot-shutdown (eglot-current-server) nil 1)
     (should-not (eglot-managed-p))
     (should-not rocq-mode--processing-overlays)
+    ;; The goal buffer is emptied and its window closed.
+    (should-not (get-buffer-window "*Rocq Goal*"))
+    (should-not (rocq-test-goals-p))
+    (should (equal (rocq-test-goal-text) ""))
     (should (zerop (cl-count-if
                     (lambda (overlay)
                       (eq (overlay-get overlay 'face)

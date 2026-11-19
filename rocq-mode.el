@@ -231,13 +231,16 @@ is why it goes on `eglot--managed-mode-hook' rather than on the public
 
 (defun rocq--on-managed-mode-change ()
   "React to Eglot starting or stopping to manage the current buffer.
-When it stops, after `eglot-shutdown' for instance, remove the overlays
-that reflect server state, as they would otherwise linger, and forget
-the last request so that the next one is sent to the next server."
+When it stops, after `eglot-shutdown' or when the buffer is killed,
+remove the overlays that reflect server state, as they would otherwise
+linger, forget the last request so that the next one is sent to the
+next server, and close the goal buffer if it shows this buffer's goals,
+which are now stale."
   (if (eglot-managed-p)
       (rocq--register-project-root)
     (rocq--clear-overlays)
-    (setq rocq--last-request-state nil)))
+    (setq rocq--last-request-state nil)
+    (rocq--forget-goals)))
 
 (defun rocq-remove-workspace-folder (folder)
   "Remove a folder to the workspace."
@@ -393,6 +396,22 @@ goes back to the Rocq buffer.
       (unless (derived-mode-p 'rocq-goal-mode)
         (rocq-goal-mode)))
     buffer))
+
+(defun rocq--forget-goals ()
+  "Empty and hide the goal buffer if it shows the goals of this buffer."
+  (when-let* ((buffer (get-buffer rocq--goal-buffer-name))
+              ((eq (buffer-local-value 'rocq--source buffer) (current-buffer))))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer))
+      (setq header-line-format nil
+            rocq--source nil
+            rocq--goals nil
+            rocq--messages nil
+            rocq--error nil
+            rocq--selected-goal nil
+            rocq--selected-evar nil))
+    (quit-windows-on buffer)))
 
 (defun rocq--display-goal-buffer ()
   "Display the goal buffer, if it exists, without selecting it.
